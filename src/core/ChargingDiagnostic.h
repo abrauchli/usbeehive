@@ -2,7 +2,7 @@
 // Port of ChargingDiagnostic.swift — identifies charging bottlenecks
 #pragma once
 
-#include <QString>
+#include <string>
 #include "PowerDelivery.h"
 #include "CableInfo.h"
 #include <optional>
@@ -19,8 +19,8 @@ struct ChargingDiagnostic {
     };
 
     Bottleneck bottleneck = NoCharger;
-    QString summary;
-    QString detail;
+    std::string summary;
+    std::string detail;
     bool isWarning = false;
 
     static std::optional<ChargingDiagnostic> evaluate(

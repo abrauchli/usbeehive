@@ -2,39 +2,39 @@
 // Aggregates all USB and Type-C data into DeviceSummary list
 #pragma once
 
-#include <QObject>
-#include <QList>
+#include <functional>
+#include <vector>
 #include "DeviceSummary.h"
 #include "UDevMonitor.h"
 
 namespace WhatCable {
 
-class DeviceManager : public QObject {
-    Q_OBJECT
-    Q_PROPERTY(int deviceCount READ deviceCount NOTIFY devicesChanged)
+class DeviceManager {
 public:
-    explicit DeviceManager(QObject *parent = nullptr);
+    DeviceManager() = default;
 
     void refresh();
     void startMonitoring();
 
-    const QList<DeviceSummary> &devices() const { return m_devices; }
-    int deviceCount() const { return m_devices.size(); }
+    const std::vector<DeviceSummary> &devices() const { return m_devices; }
+    int deviceCount() const { return static_cast<int>(m_devices.size()); }
 
-    QList<UsbDevice> rawUsbDevices() const { return m_usbDevices; }
-    QList<TypeCPort> rawTypeCPorts() const { return m_typecPorts; }
+    std::vector<UsbDevice> rawUsbDevices() const { return m_usbDevices; }
+    std::vector<TypeCPort> rawTypeCPorts() const { return m_typecPorts; }
 
-signals:
-    void devicesChanged();
+    UDevMonitor &udevMonitor() { return m_monitor; }
+    const UDevMonitor &udevMonitor() const { return m_monitor; }
+
+    /** Called after each successful refresh(). */
+    void setDevicesChangedCallback(std::function<void()> cb) { m_devicesChanged = std::move(cb); }
 
 private:
-    void onDeviceChanged();
-
     UDevMonitor m_monitor;
-    QList<DeviceSummary> m_devices;
-    QList<UsbDevice> m_usbDevices;
-    QList<TypeCPort> m_typecPorts;
-    QList<PowerDeliveryPort> m_pdPorts;
+    std::function<void()> m_devicesChanged;
+    std::vector<DeviceSummary> m_devices;
+    std::vector<UsbDevice> m_usbDevices;
+    std::vector<TypeCPort> m_typecPorts;
+    std::vector<PowerDeliveryPort> m_pdPorts;
 };
 
 } // namespace WhatCable

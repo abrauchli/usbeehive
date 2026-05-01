@@ -2,118 +2,139 @@
 // Linux equivalent of USBDevice.swift + USBWatcher.swift
 #include "UsbDevice.h"
 #include "SysfsReader.h"
-#include <QDir>
-#include <QRegularExpression>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <unordered_map>
+
+namespace fs = std::filesystem;
 
 namespace WhatCable {
 
-static const QString kUsbDevicesPath = QStringLiteral("/sys/bus/usb/devices");
+static const char kUsbDevicesPath[] = "/sys/bus/usb/devices";
 
-QString UsbDevice::displayName() const
+std::string UsbDevice::displayName() const
 {
-    if (!product.isEmpty())
+    if (!product.empty())
         return product;
-    return QStringLiteral("%1:%2").arg(vendorId, 4, 16, QChar('0')).arg(productId, 4, 16, QChar('0'));
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%04x:%04x", vendorId, productId);
+    return buf;
 }
 
-QString UsbDevice::speedLabel() const
+std::string UsbDevice::speedLabel() const
 {
-    if (speed >= 20000) return QStringLiteral("USB4 20 Gbps");
-    if (speed >= 10000) return QStringLiteral("SuperSpeed+ 10 Gbps");
-    if (speed >= 5000)  return QStringLiteral("SuperSpeed 5 Gbps");
-    if (speed >= 480)   return QStringLiteral("High Speed 480 Mbps");
-    if (speed >= 12)    return QStringLiteral("Full Speed 12 Mbps");
-    if (speed >= 2)     return QStringLiteral("Low Speed 1.5 Mbps");
-    return QStringLiteral("Unknown speed");
+    if (speed >= 20000) return "USB4 20 Gbps";
+    if (speed >= 10000) return "SuperSpeed+ 10 Gbps";
+    if (speed >= 5000)  return "SuperSpeed 5 Gbps";
+    if (speed >= 480)   return "High Speed 480 Mbps";
+    if (speed >= 12)    return "Full Speed 12 Mbps";
+    if (speed >= 2)     return "Low Speed 1.5 Mbps";
+    return "Unknown speed";
 }
 
-QString UsbDevice::powerLabel() const
+std::string UsbDevice::powerLabel() const
 {
     if (maxPowerMA <= 0)
         return {};
+    char buf[48];
     if (maxPowerMA >= 1000)
-        return QStringLiteral("%1 W").arg(maxPowerMA / 1000.0, 0, 'f', 1);
-    return QStringLiteral("%1 mA").arg(maxPowerMA);
+        std::snprintf(buf, sizeof(buf), "%.1f W", maxPowerMA / 1000.0);
+    else
+        std::snprintf(buf, sizeof(buf), "%d mA", maxPowerMA);
+    return buf;
 }
 
-static int parseMaxPower(const QString &val)
+static int parseMaxPower(std::string_view val)
 {
-    if (val.isEmpty()) return 0;
-    QString numeric = val;
-    numeric.remove(QRegularExpression(QStringLiteral("[^0-9]")));
-    bool ok = false;
-    return numeric.toInt(&ok);
+    int n = 0;
+    for (unsigned char c : val) {
+        if (std::isdigit(c))
+            n = n * 10 + static_cast<int>(c - '0');
+    }
+    return n;
 }
 
-std::optional<UsbDevice> UsbDevice::fromSysfs(const QString &path, const QString &name)
+std::optional<UsbDevice> UsbDevice::fromSysfs(const std::string &path, const std::string &name)
 {
-    // Skip interface entries like "1-2:1.0"
-    if (name.contains(':'))
+    if (name.find(':') != std::string::npos)
         return std::nullopt;
 
     UsbDevice dev;
     dev.sysfsPath = path;
     dev.busPort = name;
 
-    auto vid = SysfsReader::readHexAttribute(path + QStringLiteral("/idVendor"));
-    auto pid = SysfsReader::readHexAttribute(path + QStringLiteral("/idProduct"));
+    auto vid = SysfsReader::readHexAttribute(path + "/idVendor");
+    auto pid = SysfsReader::readHexAttribute(path + "/idProduct");
     if (!vid || !pid)
         return std::nullopt;
 
     dev.vendorId = static_cast<uint16_t>(*vid);
     dev.productId = static_cast<uint16_t>(*pid);
-    dev.manufacturer = SysfsReader::readAttribute(path + QStringLiteral("/manufacturer"));
-    dev.product = SysfsReader::readAttribute(path + QStringLiteral("/product"));
-    dev.serial = SysfsReader::readAttribute(path + QStringLiteral("/serial"));
-    dev.version = SysfsReader::readAttribute(path + QStringLiteral("/version")).trimmed();
-    dev.removable = SysfsReader::readAttribute(path + QStringLiteral("/removable"));
+    dev.manufacturer = SysfsReader::readAttribute(path + "/manufacturer");
+    dev.product = SysfsReader::readAttribute(path + "/product");
+    dev.serial = SysfsReader::readAttribute(path + "/serial");
+    {
+        std::string ver = SysfsReader::readAttribute(path + "/version");
+        auto trim = [](std::string &s) {
+            while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+            while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+        };
+        trim(ver);
+        dev.version = std::move(ver);
+    }
+    dev.removable = SysfsReader::readAttribute(path + "/removable");
 
-    dev.speed = SysfsReader::readIntAttribute(path + QStringLiteral("/speed")).value_or(0);
-    dev.maxPowerMA = parseMaxPower(SysfsReader::readAttribute(path + QStringLiteral("/bMaxPower")));
-    dev.busNum = SysfsReader::readIntAttribute(path + QStringLiteral("/busnum")).value_or(0);
-    dev.devNum = SysfsReader::readIntAttribute(path + QStringLiteral("/devnum")).value_or(0);
-    dev.rxLanes = SysfsReader::readIntAttribute(path + QStringLiteral("/rx_lanes")).value_or(0);
-    dev.txLanes = SysfsReader::readIntAttribute(path + QStringLiteral("/tx_lanes")).value_or(0);
-    dev.numConfigurations = SysfsReader::readIntAttribute(path + QStringLiteral("/bNumConfigurations")).value_or(0);
+    dev.speed = SysfsReader::readIntAttribute(path + "/speed").value_or(0);
+    dev.maxPowerMA = parseMaxPower(SysfsReader::readAttribute(path + "/bMaxPower"));
+    dev.busNum = SysfsReader::readIntAttribute(path + "/busnum").value_or(0);
+    dev.devNum = SysfsReader::readIntAttribute(path + "/devnum").value_or(0);
+    dev.rxLanes = SysfsReader::readIntAttribute(path + "/rx_lanes").value_or(0);
+    dev.txLanes = SysfsReader::readIntAttribute(path + "/tx_lanes").value_or(0);
+    dev.numConfigurations = SysfsReader::readIntAttribute(path + "/bNumConfigurations").value_or(0);
 
-    auto cls = SysfsReader::readHexAttribute(path + QStringLiteral("/bDeviceClass"));
+    auto cls = SysfsReader::readHexAttribute(path + "/bDeviceClass");
     dev.deviceClass = cls ? static_cast<uint8_t>(*cls) : 0;
-    auto sub = SysfsReader::readHexAttribute(path + QStringLiteral("/bDeviceSubClass"));
+    auto sub = SysfsReader::readHexAttribute(path + "/bDeviceSubClass");
     dev.deviceSubClass = sub ? static_cast<uint8_t>(*sub) : 0;
-    auto proto = SysfsReader::readHexAttribute(path + QStringLiteral("/bDeviceProtocol"));
+    auto proto = SysfsReader::readHexAttribute(path + "/bDeviceProtocol");
     dev.deviceProtocol = proto ? static_cast<uint8_t>(*proto) : 0;
 
     dev.isHub = (dev.deviceClass == 0x09);
-    dev.isRootHub = name.startsWith(QStringLiteral("usb"));
+    dev.isRootHub = (name.compare(0, 3, "usb") == 0);
 
-    // Parse interfaces
-    QString numIf = SysfsReader::readAttribute(path + QStringLiteral("/bNumInterfaces"));
-    dev.numInterfaces = numIf.trimmed().toInt();
+    std::string numIf = SysfsReader::readAttribute(path + "/bNumInterfaces");
+    dev.numInterfaces = static_cast<int>(std::strtol(numIf.c_str(), nullptr, 10));
 
-    QDir devDir(path);
-    const auto entries = devDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QString &entry : entries) {
-        if (!entry.contains(':'))
-            continue;
-        QString ifPath = path + QStringLiteral("/") + entry;
-        UsbInterface iface;
-        auto ifClass = SysfsReader::readHexAttribute(ifPath + QStringLiteral("/bInterfaceClass"));
-        if (!ifClass) continue;
-        iface.classCode = static_cast<uint8_t>(*ifClass);
-        auto ifSub = SysfsReader::readHexAttribute(ifPath + QStringLiteral("/bInterfaceSubClass"));
-        iface.subClass = ifSub ? static_cast<uint8_t>(*ifSub) : 0;
-        auto ifProto = SysfsReader::readHexAttribute(ifPath + QStringLiteral("/bInterfaceProtocol"));
-        iface.protocol = ifProto ? static_cast<uint8_t>(*ifProto) : 0;
+    std::error_code ec;
+    for (const auto &e : fs::directory_iterator(fs::path(path), fs::directory_options::skip_permission_denied, ec)) {
+        if (!ec && e.is_directory(ec)) {
+            const std::string entry = e.path().filename().string();
+            if (entry.find(':') == std::string::npos)
+                continue;
+            const std::string ifPath = e.path().string();
+            UsbInterface iface;
+            auto ifClass = SysfsReader::readHexAttribute(ifPath + "/bInterfaceClass");
+            if (!ifClass)
+                continue;
+            iface.classCode = static_cast<uint8_t>(*ifClass);
+            auto ifSub = SysfsReader::readHexAttribute(ifPath + "/bInterfaceSubClass");
+            iface.subClass = ifSub ? static_cast<uint8_t>(*ifSub) : 0;
+            auto ifProto = SysfsReader::readHexAttribute(ifPath + "/bInterfaceProtocol");
+            iface.protocol = ifProto ? static_cast<uint8_t>(*ifProto) : 0;
 
-        // Read driver symlink
-        QString driverLink = ifPath + QStringLiteral("/driver");
-        QFileInfo driverInfo(driverLink);
-        if (driverInfo.isSymLink())
-            iface.driver = QFileInfo(driverInfo.symLinkTarget()).fileName();
+            fs::path driverLink = fs::path(ifPath) / "driver";
+            if (fs::is_symlink(driverLink, ec))
+                iface.driver = fs::read_symlink(driverLink, ec).filename().string();
 
-        QString numStr = entry.section('.', -1);
-        iface.number = numStr.toInt();
-        dev.interfaces.append(iface);
+            size_t dot = entry.rfind('.');
+            iface.number = dot != std::string::npos && dot + 1 < entry.size()
+                ? static_cast<int>(std::strtol(entry.c_str() + dot + 1, nullptr, 10))
+                : 0;
+            dev.interfaces.push_back(iface);
+        }
     }
 
     dev.rawAttributes = SysfsReader::readAllAttributes(path);
@@ -121,49 +142,52 @@ std::optional<UsbDevice> UsbDevice::fromSysfs(const QString &path, const QString
     return dev;
 }
 
-void UsbDevice::buildTopology(QList<UsbDevice> &devices)
+void UsbDevice::buildTopology(std::vector<UsbDevice> &devices)
 {
-    QMap<QString, int> nameToIndex;
-    for (int i = 0; i < devices.size(); ++i)
-        nameToIndex.insert(devices[i].busPort, i);
+    std::unordered_map<std::string, int> nameToIndex;
+    nameToIndex.reserve(devices.size());
+    for (int i = 0; i < static_cast<int>(devices.size()); ++i)
+        nameToIndex[devices[static_cast<size_t>(i)].busPort] = i;
 
-    // Build parent-child: "1-2.3" is child of "1-2", "1-2" is child of "usb1"
-    QList<int> topLevel;
-    for (int i = 0; i < devices.size(); ++i) {
-        const QString &bp = devices[i].busPort;
-        if (devices[i].isRootHub) {
-            topLevel.append(i);
+    for (int i = 0; i < static_cast<int>(devices.size()); ++i) {
+        const std::string &bp = devices[static_cast<size_t>(i)].busPort;
+        if (devices[static_cast<size_t>(i)].isRootHub)
             continue;
+
+        std::string parentBp;
+        size_t lastDot = bp.rfind('.');
+        if (lastDot != std::string::npos && lastDot > 0)
+            parentBp = bp.substr(0, lastDot);
+        else {
+            size_t dash = bp.find('-');
+            if (dash != std::string::npos && dash > 0)
+                parentBp = "usb" + bp.substr(0, dash);
         }
-        // Parent is everything before the last '.'
-        int lastDot = bp.lastIndexOf('.');
-        QString parentBp;
-        if (lastDot > 0) {
-            parentBp = bp.left(lastDot);
-        } else {
-            // "1-2" -> parent is "usb1" (bus number is before the '-')
-            int dash = bp.indexOf('-');
-            if (dash > 0)
-                parentBp = QStringLiteral("usb") + bp.left(dash);
-        }
-        if (nameToIndex.contains(parentBp)) {
-            devices[nameToIndex[parentBp]].children.append(devices[i]);
-        }
+        auto it = nameToIndex.find(parentBp);
+        if (it != nameToIndex.end())
+            devices[static_cast<size_t>(it->second)].children.push_back(devices[static_cast<size_t>(i)]);
     }
 }
 
-QList<UsbDevice> UsbDevice::enumerate()
+std::vector<UsbDevice> UsbDevice::enumerate()
 {
-    QList<UsbDevice> devices;
-    QDir usbDir(kUsbDevicesPath);
-    if (!usbDir.exists())
+    std::vector<UsbDevice> devices;
+    std::error_code ec;
+    const fs::path base(kUsbDevicesPath);
+    if (!fs::is_directory(base, ec))
         return devices;
 
-    const auto entries = usbDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QString &entry : entries) {
-        auto dev = fromSysfs(usbDir.filePath(entry), entry);
+    std::vector<std::string> names;
+    for (const auto &e : fs::directory_iterator(base, fs::directory_options::skip_permission_denied, ec)) {
+        if (!ec && e.is_directory(ec))
+            names.push_back(e.path().filename().string());
+    }
+    std::sort(names.begin(), names.end());
+
+    for (const auto &entry : names) {
+        auto dev = fromSysfs((base / entry).string(), entry);
         if (dev)
-            devices.append(std::move(*dev));
+            devices.push_back(std::move(*dev));
     }
 
     buildTopology(devices);

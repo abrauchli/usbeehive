@@ -6,6 +6,8 @@ A command-line tool that tells you, in plain English, what each USB device plugg
 
 **WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** This port expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
 
+This repository is forked from [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux).
+
 ## What it shows
 
 ### All USB devices
@@ -28,20 +30,18 @@ A command-line tool that tells you, in plain English, what each USB device plugg
 
 ### Build from source
 
-Install a C++ toolchain, CMake, pkg-config, Qt 6 Base development files (provides Qt Core for CMake `Qt6::Core`), and libudev development headers.
+Requires C++20, CMake, pkg-config, libudev headers, and a filesystem library (`std::filesystem`, provided by your toolchain).
 
 ```bash
 # Ubuntu / Debian
-sudo apt install build-essential cmake pkg-config qt6-base-dev libudev-dev
+sudo apt install build-essential cmake pkg-config libudev-dev
 
 # Fedora
-sudo dnf install gcc-c++ cmake pkgconf-pkg-config qt6-qtbase-devel systemd-devel
+sudo dnf install gcc-c++ cmake pkgconf-pkg-config systemd-devel
 
 # Arch / Manjaro
-sudo pacman -S --needed base-devel cmake pkgconf qt6-base systemd-libs
+sudo pacman -S --needed base-devel cmake pkgconf systemd-libs
 ```
-
-The Ubuntu package `qt6-base-dev` bundles Qt Core headers and CMake config alongside other qtbase modules; this project links **only** `Qt6::Core`, not Qt Widgets or Qt Quick.
 
 Build and optionally install:
 
@@ -86,6 +86,8 @@ Cable speed and power decoding follow the USB Power Delivery 3.x spec, ported fr
 - **Vendor name lookup is not exhaustive.** Common vendors are recognized; others show the hex VID.
 
 ## Credits
+
+Upstream Linux/KDE codebase: [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux).
 
 WhatCable-Linux is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app.
 

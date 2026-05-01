@@ -8,8 +8,8 @@ WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/w
 
 Two components share a single core library:
 
-- **`src/core/`** — `libwhatcablecore`, a static C++ library. Reads sysfs, decodes USB PD data, and produces human-readable summaries. Qt6::Core only (no Qt Widgets / Quick).
-- **`src/cli/`** — `whatcable-linux` CLI binary. Uses the core library. Supports `--json`, `--watch`, `--raw`.
+- **`src/core/`** — `libwhatcablecore`, a static C++ library (C++20, STL only). Reads sysfs over `std::filesystem` / streams, decodes USB PD data, and produces human-readable summaries. Links **`libudev`** for hotplug FD monitoring only — no Qt or other GUI/toolkit dependency.
+- **`src/cli/`** — `whatcable-linux` CLI binary. POSIX `getopt_long`, manual JSON serialization for `--json`, `poll()` + 500 ms debounce for `--watch`.
 
 ## Key Data Flow
 
@@ -27,9 +27,9 @@ Two components share a single core library:
 
 ## Code Conventions
 
-- C++20, Qt 6 style. Use `QStringLiteral()` for string literals.
+- C++20, standard library. Use ordinary string literals or `std::string` / `std::string_view` as appropriate.
 - All core classes are in the `WhatCable` namespace.
-- sysfs reads go through `SysfsReader` — never read `/sys/` directly with raw file I/O.
+- sysfs reads go through `SysfsReader` — never read `/sys/` directly with raw file I/O from call sites (implementation may use filesystem APIs inside `SysfsReader`).
 - Source files derived from the original Swift code must keep the attribution header: `// Derived from WhatCable by Darryl Morley (https://github.com/darrylmorley/whatcable)`
 - Handle missing sysfs paths gracefully — return empty/nullopt, never crash. Many systems lack `/sys/class/typec/` or `/sys/class/usb_power_delivery/`.
 
@@ -57,13 +57,13 @@ cmake --build build
 | `src/core/DeviceSummary.h/cpp` | Generates headlines, subtitles, bullets per device |
 | `src/core/ChargingDiagnostic.h/cpp` | Identifies USB-C charging bottlenecks |
 | `src/core/DeviceManager.h/cpp` | Aggregates all sources, correlates data, owns refresh logic |
-| `src/core/UDevMonitor.h/cpp` | libudev hotplug monitoring |
+| `src/core/UDevMonitor.h/cpp` | libudev monitor + fd for `poll()` |
 | `src/core/VendorDB.h/cpp` | USB VID → vendor name lookup |
 | `src/core/UsbClassDB.h/cpp` | USB class code → human name |
 
 ## Adding New Vendors
 
-Add entries to the `kVendors` map in `src/core/VendorDB.cpp`. Format: `{0xVID, QStringLiteral("Vendor Name")}`.
+Add entries to the `kVendors` map in `src/core/VendorDB.cpp`. Format: `{0xVID, "Vendor Name"}`.
 
 ## Adding New USB Class Codes
 

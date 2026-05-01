@@ -2,10 +2,10 @@
 // Linux equivalent of PowerSource.swift — reads /sys/class/usb_power_delivery/
 #pragma once
 
-#include <QString>
-#include <QList>
-#include <QMap>
+#include <map>
 #include <optional>
+#include <string>
+#include <vector>
 #include <cstdint>
 
 namespace WhatCable {
@@ -21,31 +21,31 @@ struct PowerDataObject {
     bool isActive = false;
     int index = 0;
 
-    QString voltageLabel() const;
-    QString currentLabel() const;
-    QString powerLabel() const;
-    QString typeLabel() const;
+    std::string voltageLabel() const;
+    std::string currentLabel() const;
+    std::string powerLabel() const;
+    std::string typeLabel() const;
 };
 
 struct PowerDeliveryPort {
-    QString sysfsPath;
-    QString name;
-    QString parentPortType;
+    std::string sysfsPath;
+    std::string name;
+    std::string parentPortType;
     int parentPortNumber = -1;
 
-    QList<PowerDataObject> sourceCapabilities;
-    QList<PowerDataObject> sinkCapabilities;
+    std::vector<PowerDataObject> sourceCapabilities;
+    std::vector<PowerDataObject> sinkCapabilities;
 
     int maxSourcePowerMW = 0;
     std::optional<int> activeSourcePdoIndex;
 
-    QMap<QString, QString> rawAttributes;
+    std::map<std::string, std::string> rawAttributes;
 
-    static QList<PowerDeliveryPort> enumerate();
+    static std::vector<PowerDeliveryPort> enumerate();
 
 private:
-    static std::optional<PowerDeliveryPort> fromSysfs(const QString &path, const QString &name);
-    static QList<PowerDataObject> parsePDOs(const QString &capsPath);
+    static std::optional<PowerDeliveryPort> fromSysfs(const std::string &path, const std::string &name);
+    static std::vector<PowerDataObject> parsePDOs(const std::string &capsPath);
 };
 
 } // namespace WhatCable

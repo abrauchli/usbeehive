@@ -2,10 +2,10 @@
 // Linux equivalent of USBCPort.swift — reads /sys/class/typec/
 #pragma once
 
-#include <QString>
-#include <QList>
-#include <QMap>
+#include <map>
 #include <optional>
+#include <string>
+#include <vector>
 #include <cstdint>
 
 namespace WhatCable {
@@ -13,51 +13,51 @@ namespace WhatCable {
 struct TypeCIdentity {
     uint16_t vendorId = 0;
     uint16_t productId = 0;
-    QList<uint32_t> vdos;
+    std::vector<uint32_t> vdos;
 };
 
 struct TypeCPartner {
-    QString type;
+    std::string type;
     std::optional<TypeCIdentity> identity;
-    QMap<QString, QString> rawAttributes;
+    std::map<std::string, std::string> rawAttributes;
 };
 
 struct TypeCCable {
-    QString type;          // "active", "passive"
-    QString plugType;
+    std::string type;          // "active", "passive"
+    std::string plugType;
     std::optional<TypeCIdentity> identity;
-    QMap<QString, QString> rawAttributes;
+    std::map<std::string, std::string> rawAttributes;
 };
 
 struct TypeCPort {
-    QString sysfsPath;
-    QString portName;      // "port0", "port1", ...
+    std::string sysfsPath;
+    std::string portName;      // "port0", "port1", ...
     int portNumber = -1;
 
-    QString dataRole;      // "host", "device", "[host]", "[device]"
-    QString powerRole;     // "source", "sink", "[source]", "[sink]"
-    QString portType;      // "dual", "source", "sink"
-    QString powerOpMode;   // "default", "1.5A", "3.0A", "usb_power_delivery"
-    QString orientation;   // "normal", "reverse", "unknown"
-    QString pdRevision;
-    QString usbTypeCRev;
+    std::string dataRole;      // "host", "device", "[host]", "[device]"
+    std::string powerRole;     // "source", "sink", "[source]", "[sink]"
+    std::string portType;      // "dual", "source", "sink"
+    std::string powerOpMode;   // "default", "1.5A", "3.0A", "usb_power_delivery"
+    std::string orientation;   // "normal", "reverse", "unknown"
+    std::string pdRevision;
+    std::string usbTypeCRev;
 
     bool hasPartner = false;
     std::optional<TypeCPartner> partner;
     bool hasCable = false;
     std::optional<TypeCCable> cable;
 
-    QMap<QString, QString> rawAttributes;
+    std::map<std::string, std::string> rawAttributes;
 
     bool isConnected() const;
-    QString currentDataRole() const;
-    QString currentPowerRole() const;
+    std::string currentDataRole() const;
+    std::string currentPowerRole() const;
 
-    static QList<TypeCPort> enumerate();
+    static std::vector<TypeCPort> enumerate();
 
 private:
-    static std::optional<TypeCPort> fromSysfs(const QString &path, const QString &name);
-    static std::optional<TypeCIdentity> readIdentity(const QString &path);
+    static std::optional<TypeCPort> fromSysfs(const std::string &path, const std::string &name);
+    static std::optional<TypeCIdentity> readIdentity(const std::string &path);
 };
 
 } // namespace WhatCable

@@ -9,8 +9,8 @@ std::optional<CableInfo> CableInfo::fromTypeCCable(const TypeCCable &cable)
     CableInfo info;
     info.cableType = cable.type;
     info.plugType = cable.plugType;
-    info.isActive = (cable.type == QStringLiteral("active"));
-    info.isPassive = (cable.type == QStringLiteral("passive"));
+    info.isActive = (cable.type == "active");
+    info.isPassive = (cable.type == "passive");
     info.rawAttributes = cable.rawAttributes;
 
     if (cable.identity) {
@@ -18,7 +18,7 @@ std::optional<CableInfo> CableInfo::fromTypeCCable(const TypeCCable &cable)
         info.vendorId = id.vendorId;
         info.vendorName = VendorDB::lookup(id.vendorId);
 
-        if (!id.vdos.isEmpty()) {
+        if (!id.vdos.empty()) {
             auto hdr = decodeIDHeader(id.vdos[0]);
             bool active = (hdr.ufpProductType == ProductType::ActiveCable);
 

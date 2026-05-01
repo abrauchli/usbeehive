@@ -20,7 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           dnf install -y gcc-c++ cmake pkgconf-pkg-config \
-            qt6-qtbase-devel systemd-devel tar gzip
+            systemd-devel tar gzip
 
       - name: Configure
         run: cmake -B build -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release

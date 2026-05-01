@@ -2,116 +2,122 @@
 // Linux equivalent of USBCPort.swift + USBCPortWatcher.swift
 #include "TypeCPort.h"
 #include "SysfsReader.h"
-#include <QDir>
-#include <QRegularExpression>
+#include <algorithm>
+#include <cstdlib>
+#include <filesystem>
+#include <regex>
+
+namespace fs = std::filesystem;
 
 namespace WhatCable {
 
-static const QString kTypecPath = QStringLiteral("/sys/class/typec");
+static const char kTypecPath[] = "/sys/class/typec";
 
 bool TypeCPort::isConnected() const
 {
     return hasPartner || hasCable;
 }
 
-QString TypeCPort::currentDataRole() const
+std::string TypeCPort::currentDataRole() const
 {
-    // sysfs shows current role in brackets like "[host] device"
-    QRegularExpression re(QStringLiteral("\\[([^\\]]+)\\]"));
-    auto match = re.match(dataRole);
-    if (match.hasMatch())
-        return match.captured(1);
+    static const std::regex re(R"(\[([^\]]+)\])");
+    std::smatch match;
+    if (std::regex_search(dataRole, match, re) && match.size() > 1)
+        return match[1].str();
     return dataRole;
 }
 
-QString TypeCPort::currentPowerRole() const
+std::string TypeCPort::currentPowerRole() const
 {
-    QRegularExpression re(QStringLiteral("\\[([^\\]]+)\\]"));
-    auto match = re.match(powerRole);
-    if (match.hasMatch())
-        return match.captured(1);
+    static const std::regex re(R"(\[([^\]]+)\])");
+    std::smatch match;
+    if (std::regex_search(powerRole, match, re) && match.size() > 1)
+        return match[1].str();
     return powerRole;
 }
 
-std::optional<TypeCIdentity> TypeCPort::readIdentity(const QString &path)
+std::optional<TypeCIdentity> TypeCPort::readIdentity(const std::string &path)
 {
-    QString idPath = path + QStringLiteral("/identity");
+    const std::string idPath = path + "/identity";
     if (!SysfsReader::pathExists(idPath))
         return std::nullopt;
 
     TypeCIdentity id;
-    auto vid = SysfsReader::readHexAttribute(idPath + QStringLiteral("/id_header"));
+    auto vid = SysfsReader::readHexAttribute(idPath + "/id_header");
     if (vid)
         id.vendorId = static_cast<uint16_t>(*vid & 0xFFFF);
 
-    auto pid = SysfsReader::readHexAttribute(idPath + QStringLiteral("/product"));
+    auto pid = SysfsReader::readHexAttribute(idPath + "/product");
     if (pid)
         id.productId = static_cast<uint16_t>(*pid & 0xFFFF);
 
-    // Read VDO files (vdo1, vdo2, vdo3, etc. or numbered)
-    QDir idDir(idPath);
-    const auto entries = idDir.entryList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QString &entry : entries) {
-        if (!entry.startsWith(QStringLiteral("vdo")) &&
-            entry != QStringLiteral("id_header") &&
-            entry != QStringLiteral("cert_stat") &&
-            entry != QStringLiteral("product") &&
-            entry != QStringLiteral("product_type_vdo1") &&
-            entry != QStringLiteral("product_type_vdo2") &&
-            entry != QStringLiteral("product_type_vdo3"))
+    std::error_code ec;
+    std::vector<std::string> names;
+    for (const auto &e : fs::directory_iterator(fs::path(idPath), fs::directory_options::skip_permission_denied, ec)) {
+        if (!ec && e.is_regular_file(ec))
+            names.push_back(e.path().filename().string());
+    }
+    std::sort(names.begin(), names.end());
+
+    for (const auto &entry : names) {
+        if (!entry.starts_with("vdo") &&
+            entry != "id_header" &&
+            entry != "cert_stat" &&
+            entry != "product" &&
+            entry != "product_type_vdo1" &&
+            entry != "product_type_vdo2" &&
+            entry != "product_type_vdo3")
             continue;
 
-        auto val = SysfsReader::readHexAttribute(idPath + QStringLiteral("/") + entry);
+        auto val = SysfsReader::readHexAttribute(idPath + "/" + entry);
         if (val)
-            id.vdos.append(*val);
+            id.vdos.push_back(*val);
     }
 
-    if (id.vendorId == 0 && id.vdos.isEmpty())
+    if (id.vendorId == 0 && id.vdos.empty())
         return std::nullopt;
 
     return id;
 }
 
-std::optional<TypeCPort> TypeCPort::fromSysfs(const QString &path, const QString &name)
+std::optional<TypeCPort> TypeCPort::fromSysfs(const std::string &path, const std::string &name)
 {
-    if (!name.startsWith(QStringLiteral("port")))
+    if (!name.starts_with("port"))
         return std::nullopt;
 
     TypeCPort port;
     port.sysfsPath = path;
     port.portName = name;
 
-    QRegularExpression numRe(QStringLiteral("port(\\d+)"));
-    auto match = numRe.match(name);
-    if (match.hasMatch())
-        port.portNumber = match.captured(1).toInt();
+    static const std::regex numRe(R"(port(\d+))");
+    std::smatch match;
+    if (std::regex_match(name, match, numRe) && match.size() > 1)
+        port.portNumber = static_cast<int>(std::strtol(match[1].str().c_str(), nullptr, 10));
 
-    port.dataRole = SysfsReader::readAttribute(path + QStringLiteral("/data_role"));
-    port.powerRole = SysfsReader::readAttribute(path + QStringLiteral("/power_role"));
-    port.portType = SysfsReader::readAttribute(path + QStringLiteral("/port_type"));
-    port.powerOpMode = SysfsReader::readAttribute(path + QStringLiteral("/power_operation_mode"));
-    port.orientation = SysfsReader::readAttribute(path + QStringLiteral("/orientation"));
-    port.pdRevision = SysfsReader::readAttribute(path + QStringLiteral("/usb_power_delivery_revision"));
-    port.usbTypeCRev = SysfsReader::readAttribute(path + QStringLiteral("/usb_typec_revision"));
+    port.dataRole = SysfsReader::readAttribute(path + "/data_role");
+    port.powerRole = SysfsReader::readAttribute(path + "/power_role");
+    port.portType = SysfsReader::readAttribute(path + "/port_type");
+    port.powerOpMode = SysfsReader::readAttribute(path + "/power_operation_mode");
+    port.orientation = SysfsReader::readAttribute(path + "/orientation");
+    port.pdRevision = SysfsReader::readAttribute(path + "/usb_power_delivery_revision");
+    port.usbTypeCRev = SysfsReader::readAttribute(path + "/usb_typec_revision");
 
-    // Check for partner (portN-partner)
-    QString partnerPath = path + QStringLiteral("-partner");
+    const std::string partnerPath = path + "-partner";
     if (SysfsReader::pathExists(partnerPath)) {
         port.hasPartner = true;
         TypeCPartner p;
-        p.type = SysfsReader::readAttribute(partnerPath + QStringLiteral("/type"));
+        p.type = SysfsReader::readAttribute(partnerPath + "/type");
         p.identity = readIdentity(partnerPath);
         p.rawAttributes = SysfsReader::readAllAttributes(partnerPath);
         port.partner = std::move(p);
     }
 
-    // Check for cable (portN-cable)
-    QString cablePath = path + QStringLiteral("-cable");
+    const std::string cablePath = path + "-cable";
     if (SysfsReader::pathExists(cablePath)) {
         port.hasCable = true;
         TypeCCable c;
-        c.type = SysfsReader::readAttribute(cablePath + QStringLiteral("/type"));
-        c.plugType = SysfsReader::readAttribute(cablePath + QStringLiteral("/plug_type"));
+        c.type = SysfsReader::readAttribute(cablePath + "/type");
+        c.plugType = SysfsReader::readAttribute(cablePath + "/plug_type");
         c.identity = readIdentity(cablePath);
         c.rawAttributes = SysfsReader::readAllAttributes(cablePath);
         port.cable = std::move(c);
@@ -122,18 +128,25 @@ std::optional<TypeCPort> TypeCPort::fromSysfs(const QString &path, const QString
     return port;
 }
 
-QList<TypeCPort> TypeCPort::enumerate()
+std::vector<TypeCPort> TypeCPort::enumerate()
 {
-    QList<TypeCPort> ports;
+    std::vector<TypeCPort> ports;
     if (!SysfsReader::pathExists(kTypecPath))
         return ports;
 
-    QDir typecDir(kTypecPath);
-    const auto entries = typecDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QString &entry : entries) {
-        auto port = fromSysfs(typecDir.filePath(entry), entry);
+    std::error_code ec;
+    const fs::path base(kTypecPath);
+    std::vector<std::string> entries;
+    for (const auto &e : fs::directory_iterator(base, fs::directory_options::skip_permission_denied, ec)) {
+        if (!ec && e.is_directory(ec))
+            entries.push_back(e.path().filename().string());
+    }
+    std::sort(entries.begin(), entries.end());
+
+    for (const auto &entry : entries) {
+        auto port = fromSysfs((base / entry).string(), entry);
         if (port)
-            ports.append(std::move(*port));
+            ports.push_back(std::move(*port));
     }
 
     return ports;

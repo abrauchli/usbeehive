@@ -1,68 +1,101 @@
 // Derived from WhatCable by Darryl Morley (https://github.com/darrylmorley/whatcable)
 #include "SysfsReader.h"
-#include <QFile>
-#include <QDir>
-#include <QTextStream>
+#include <algorithm>
+#include <cctype>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+
+namespace fs = std::filesystem;
 
 namespace WhatCable {
 
-QString SysfsReader::readAttribute(const QString &path)
+namespace {
+
+std::string trim(std::string s)
 {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    auto not_space_front = [](unsigned char c) { return !std::isspace(c); };
+    auto not_space_back = [](unsigned char c) { return !std::isspace(c); };
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), not_space_front));
+    s.erase(std::find_if(s.rbegin(), s.rend(), not_space_back).base(), s.end());
+    return s;
+}
+
+} // namespace
+
+std::string SysfsReader::readAttribute(const std::string &path)
+{
+    std::ifstream file(path);
+    if (!file)
         return {};
-    QTextStream stream(&file);
-    return stream.readLine().trimmed();
+    std::string line;
+    std::getline(file, line);
+    return trim(std::move(line));
 }
 
-std::optional<int> SysfsReader::readIntAttribute(const QString &path)
+std::optional<int> SysfsReader::readIntAttribute(const std::string &path)
 {
-    const QString val = readAttribute(path);
-    if (val.isEmpty())
+    const std::string val = readAttribute(path);
+    if (val.empty())
         return std::nullopt;
-    bool ok = false;
-    int result = val.toInt(&ok);
-    return ok ? std::optional(result) : std::nullopt;
-}
-
-std::optional<uint32_t> SysfsReader::readHexAttribute(const QString &path)
-{
-    QString val = readAttribute(path);
-    if (val.isEmpty())
+    char *end = nullptr;
+    long result = std::strtol(val.c_str(), &end, 10);
+    if (end == val.c_str())
         return std::nullopt;
-    if (val.startsWith(QStringLiteral("0x")) || val.startsWith(QStringLiteral("0X")))
-        val = val.mid(2);
-    bool ok = false;
-    uint32_t result = val.toUInt(&ok, 16);
-    return ok ? std::optional(result) : std::nullopt;
+    return static_cast<int>(result);
 }
 
-QStringList SysfsReader::listSubdirectories(const QString &path)
+std::optional<uint32_t> SysfsReader::readHexAttribute(const std::string &path)
 {
-    QDir dir(path);
-    if (!dir.exists())
-        return {};
-    return dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    std::string val = readAttribute(path);
+    if (val.empty())
+        return std::nullopt;
+    if (val.size() >= 2 && val[0] == '0' && (val[1] == 'x' || val[1] == 'X'))
+        val.erase(0, 2);
+    char *end = nullptr;
+    unsigned long result = std::strtoul(val.c_str(), &end, 16);
+    if (end == val.c_str())
+        return std::nullopt;
+    return static_cast<uint32_t>(result);
 }
 
-QMap<QString, QString> SysfsReader::readAllAttributes(const QString &dirPath)
+std::vector<std::string> SysfsReader::listSubdirectories(const std::string &path)
 {
-    QMap<QString, QString> attrs;
-    QDir dir(dirPath);
-    if (!dir.exists())
+    std::vector<std::string> out;
+    std::error_code ec;
+    const fs::path base(path);
+    if (!fs::is_directory(base, ec))
+        return out;
+    for (const auto &e : fs::directory_iterator(base, fs::directory_options::skip_permission_denied, ec)) {
+        if (!ec && e.is_directory(ec))
+            out.push_back(e.path().filename().string());
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+std::map<std::string, std::string> SysfsReader::readAllAttributes(const std::string &dirPath)
+{
+    std::map<std::string, std::string> attrs;
+    std::error_code ec;
+    const fs::path dir(dirPath);
+    if (!fs::is_directory(dir, ec))
         return attrs;
-    const auto entries = dir.entryList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name);
-    for (const QString &entry : entries) {
-        const QString val = readAttribute(dir.filePath(entry));
-        if (!val.isEmpty())
-            attrs.insert(entry, val);
+    for (const auto &e : fs::directory_iterator(dir, fs::directory_options::skip_permission_denied, ec)) {
+        if (!ec && e.is_regular_file(ec)) {
+            const std::string fname = e.path().filename().string();
+            const std::string val = readAttribute(e.path().string());
+            if (!val.empty())
+                attrs[fname] = val;
+        }
     }
     return attrs;
 }
 
-bool SysfsReader::pathExists(const QString &path)
+bool SysfsReader::pathExists(const std::string &path)
 {
-    return QFile::exists(path) || QDir(path).exists();
+    std::error_code ec;
+    return fs::exists(fs::path(path), ec);
 }
 
 } // namespace WhatCable

@@ -2,7 +2,7 @@
 // Port of PDVDO.swift — USB Power Delivery VDO bit-field decoding
 #pragma once
 
-#include <QString>
+#include <string>
 #include <cstdint>
 
 namespace WhatCable {
@@ -50,10 +50,10 @@ struct CableVDO {
     int maxWatts = 0;
 };
 
-QString productTypeLabel(ProductType type);
-QString cableSpeedLabel(CableSpeed speed);
+std::string productTypeLabel(ProductType type);
+std::string cableSpeedLabel(CableSpeed speed);
 int cableSpeedMaxGbps(CableSpeed speed);
-QString cableCurrentLabel(CableCurrent current);
+std::string cableCurrentLabel(CableCurrent current);
 double cableCurrentMaxAmps(CableCurrent current);
 
 IDHeaderVDO decodeIDHeader(uint32_t vdo);

@@ -4,25 +4,26 @@
 
 #include "TypeCPort.h"
 #include "PDDecoder.h"
-#include <QString>
+#include <map>
 #include <optional>
+#include <string>
 
 namespace WhatCable {
 
 struct CableInfo {
     bool isActive = false;
     bool isPassive = false;
-    QString cableType;           // "active", "passive"
-    QString plugType;
+    std::string cableType;           // "active", "passive"
+    std::string plugType;
 
     std::optional<CableSpeed> speed;
     std::optional<CableCurrent> currentRating;
     int maxWatts = 0;
 
     uint16_t vendorId = 0;
-    QString vendorName;
+    std::string vendorName;
 
-    QMap<QString, QString> rawAttributes;
+    std::map<std::string, std::string> rawAttributes;
 
     static std::optional<CableInfo> fromTypeCCable(const TypeCCable &cable);
 };

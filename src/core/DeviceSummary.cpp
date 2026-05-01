@@ -4,8 +4,36 @@
 #include "VendorDB.h"
 #include "UsbClassDB.h"
 #include "PDDecoder.h"
+#include <algorithm>
+#include <cstdio>
 
 namespace WhatCable {
+
+namespace {
+
+bool startsWithHexVid(const std::string &vendorName)
+{
+    return vendorName.size() >= 2 && vendorName[0] == '0' &&
+           (vendorName[1] == 'x' || vendorName[1] == 'X');
+}
+
+bool vecContains(const std::vector<std::string> &v, const std::string &s)
+{
+    return std::find(v.begin(), v.end(), s) != v.end();
+}
+
+std::string joinComma(const std::vector<std::string> &v)
+{
+    std::string out;
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (i)
+            out += ", ";
+        out += v[i];
+    }
+    return out;
+}
+
+} // namespace
 
 DeviceSummary DeviceSummary::fromUsbDevice(const UsbDevice &dev)
 {
@@ -14,74 +42,78 @@ DeviceSummary DeviceSummary::fromUsbDevice(const UsbDevice &dev)
     s.status = Connected;
     s.usbDevice = dev;
 
-    QString vendorName = VendorDB::lookup(dev.vendorId);
-    bool hasVendorName = !vendorName.startsWith(QStringLiteral("0x"));
+    std::string vendorName = VendorDB::lookup(dev.vendorId);
+    bool hasVendorName = !startsWithHexVid(vendorName);
 
-    // Headline: product name or vendor:product
     s.headline = dev.displayName();
 
-    // Subtitle: vendor + type
-    QString deviceType;
+    std::string deviceType;
     if (dev.deviceClass != 0 && dev.deviceClass != 0xFF) {
         deviceType = UsbClassDB::className(dev.deviceClass);
-    } else if (!dev.interfaces.isEmpty()) {
-        // Composite device — derive type from interfaces
-        QStringList types;
+    } else if (!dev.interfaces.empty()) {
+        std::vector<std::string> types;
         for (const auto &iface : dev.interfaces) {
-            QString t = UsbClassDB::className(iface.classCode);
-            if (!types.contains(t) && t != QStringLiteral("Composite") &&
-                !t.startsWith(QStringLiteral("0x")))
-                types.append(t);
+            std::string t = UsbClassDB::className(iface.classCode);
+            if (!vecContains(types, t) && t != "Composite" && !startsWithHexVid(t))
+                types.push_back(t);
         }
-        deviceType = types.join(QStringLiteral(", "));
+        deviceType = joinComma(types);
     }
 
     if (hasVendorName)
         s.subtitle = vendorName;
-    if (!deviceType.isEmpty()) {
-        if (!s.subtitle.isEmpty())
-            s.subtitle += QStringLiteral(" · ");
+    if (!deviceType.empty()) {
+        if (!s.subtitle.empty())
+            s.subtitle += " · ";
         s.subtitle += deviceType;
     }
 
-    // Bullets
-    s.bullets.append(dev.speedLabel());
+    s.bullets.push_back(dev.speedLabel());
 
     if (dev.maxPowerMA > 0)
-        s.bullets.append(QStringLiteral("Power: %1").arg(dev.powerLabel()));
+        s.bullets.push_back("Power: " + dev.powerLabel());
 
-    s.bullets.append(QStringLiteral("USB %1").arg(dev.version));
+    s.bullets.push_back("USB " + dev.version);
 
-    if (!dev.serial.isEmpty())
-        s.bullets.append(QStringLiteral("Serial: %1").arg(dev.serial));
-
-    if (dev.removable == QStringLiteral("removable"))
-        s.bullets.append(QStringLiteral("Removable"));
-    else if (dev.removable == QStringLiteral("fixed"))
-        s.bullets.append(QStringLiteral("Built-in"));
-
-    // Driver info from interfaces
-    QStringList drivers;
-    for (const auto &iface : dev.interfaces) {
-        if (!iface.driver.isEmpty() && !drivers.contains(iface.driver))
-            drivers.append(iface.driver);
+    if (!dev.serial.empty()) {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "Serial: %s", dev.serial.c_str());
+        s.bullets.emplace_back(buf);
     }
-    if (!drivers.isEmpty())
-        s.bullets.append(QStringLiteral("Drivers: %1").arg(drivers.join(QStringLiteral(", "))));
 
-    s.bullets.append(QStringLiteral("VID:PID %1:%2")
-                         .arg(dev.vendorId, 4, 16, QChar('0'))
-                         .arg(dev.productId, 4, 16, QChar('0')));
+    if (dev.removable == "removable")
+        s.bullets.emplace_back("Removable");
+    else if (dev.removable == "fixed")
+        s.bullets.emplace_back("Built-in");
 
-    // Icon
-    if (dev.isHub) s.icon = QStringLiteral("network-wired");
-    else if (deviceType.contains(QStringLiteral("Audio"))) s.icon = QStringLiteral("audio-card");
-    else if (deviceType.contains(QStringLiteral("HID"))) s.icon = QStringLiteral("input-keyboard");
-    else if (deviceType.contains(QStringLiteral("Mass Storage"))) s.icon = QStringLiteral("drive-removable-media");
-    else if (deviceType.contains(QStringLiteral("Video"))) s.icon = QStringLiteral("camera-web");
-    else if (deviceType.contains(QStringLiteral("Wireless"))) s.icon = QStringLiteral("network-wireless");
-    else if (deviceType.contains(QStringLiteral("Printer"))) s.icon = QStringLiteral("printer");
-    else s.icon = QStringLiteral("drive-removable-media-usb");
+    std::vector<std::string> drivers;
+    for (const auto &iface : dev.interfaces) {
+        if (!iface.driver.empty() && !vecContains(drivers, iface.driver))
+            drivers.push_back(iface.driver);
+    }
+    if (!drivers.empty())
+        s.bullets.push_back("Drivers: " + joinComma(drivers));
+
+    char vidpid[24];
+    std::snprintf(vidpid, sizeof(vidpid), "VID:PID %04x:%04x", dev.vendorId, dev.productId);
+    s.bullets.emplace_back(vidpid);
+
+    if (dev.isHub)
+        s.icon = "network-wired";
+    else if (deviceType.find("Audio") != std::string::npos)
+        s.icon = "audio-card";
+    else if (deviceType.find("HID") != std::string::npos)
+        s.icon = "input-keyboard";
+    else if (deviceType.find("Mass Storage") != std::string::npos)
+        s.icon = "drive-removable-media";
+    else if (deviceType.find("Video") != std::string::npos)
+        s.icon = "camera-web";
+    else if (deviceType.find("Wireless") != std::string::npos)
+        s.icon = "network-wireless";
+    else if (deviceType.find("Printer") != std::string::npos)
+        s.icon = "printer";
+    else
+        s.icon = "drive-removable-media-usb";
 
     return s;
 }
@@ -96,81 +128,104 @@ DeviceSummary DeviceSummary::fromTypeCPort(
     s.typecPort = port;
     s.powerDelivery = pd;
     s.cable = cableOpt;
-    s.icon = QStringLiteral("plug");
+    s.icon = "plug";
 
     if (!port.isConnected()) {
         s.status = Empty;
-        s.headline = QStringLiteral("USB-C Port %1").arg(port.portNumber);
-        s.subtitle = QStringLiteral("Nothing connected");
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "USB-C Port %d", port.portNumber);
+        s.headline = buf;
+        s.subtitle = "Nothing connected";
         return s;
     }
 
     s.status = Connected;
-    s.headline = QStringLiteral("USB-C Port %1").arg(port.portNumber);
+    {
+        char buf[48];
+        std::snprintf(buf, sizeof(buf), "USB-C Port %d", port.portNumber);
+        s.headline = buf;
+    }
 
-    // Determine headline from what's connected
     if (port.hasPartner && port.partner) {
-        if (port.partner->identity && !port.partner->identity->vdos.isEmpty()) {
+        if (port.partner->identity && !port.partner->identity->vdos.empty()) {
             auto hdr = decodeIDHeader(port.partner->identity->vdos[0]);
-            QString productLabel = productTypeLabel(hdr.ufpProductType);
-            QString vendorLabel = VendorDB::lookup(hdr.vendorId);
-            bool hasVendor = !vendorLabel.startsWith(QStringLiteral("0x"));
-            s.subtitle = hasVendor
-                ? QStringLiteral("%1 — %2").arg(vendorLabel, productLabel)
-                : productLabel;
+            std::string productLabel = productTypeLabel(hdr.ufpProductType);
+            std::string vendorLabel = VendorDB::lookup(hdr.vendorId);
+            bool hasVendor = !startsWithHexVid(vendorLabel);
+            s.subtitle = hasVendor ? vendorLabel + " — " + productLabel : productLabel;
         } else {
-            s.subtitle = QStringLiteral("Device connected");
+            s.subtitle = "Device connected";
         }
     }
 
-    // Data and power roles
-    QString dataStr = port.currentDataRole();
-    QString powerStr = port.currentPowerRole();
-    if (!dataStr.isEmpty() || !powerStr.isEmpty()) {
-        QString roleInfo;
-        if (!dataStr.isEmpty())
-            roleInfo = QStringLiteral("Data: %1").arg(dataStr);
-        if (!powerStr.isEmpty()) {
-            if (!roleInfo.isEmpty()) roleInfo += QStringLiteral(", ");
-            roleInfo += QStringLiteral("Power: %1").arg(powerStr);
+    std::string dataStr = port.currentDataRole();
+    std::string powerStr = port.currentPowerRole();
+    if (!dataStr.empty() || !powerStr.empty()) {
+        std::string roleInfo;
+        if (!dataStr.empty())
+            roleInfo = "Data: " + dataStr;
+        if (!powerStr.empty()) {
+            if (!roleInfo.empty())
+                roleInfo += ", ";
+            roleInfo += "Power: " + powerStr;
         }
-        s.bullets.append(roleInfo);
+        s.bullets.push_back(roleInfo);
     }
 
-    if (!port.powerOpMode.isEmpty())
-        s.bullets.append(QStringLiteral("Power mode: %1").arg(port.powerOpMode));
+    if (!port.powerOpMode.empty()) {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "Power mode: %s", port.powerOpMode.c_str());
+        s.bullets.emplace_back(buf);
+    }
 
-    if (!port.pdRevision.isEmpty())
-        s.bullets.append(QStringLiteral("PD revision: %1").arg(port.pdRevision));
+    if (!port.pdRevision.empty()) {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "PD revision: %s", port.pdRevision.c_str());
+        s.bullets.emplace_back(buf);
+    }
 
-    if (!port.orientation.isEmpty() && port.orientation != QStringLiteral("unknown"))
-        s.bullets.append(QStringLiteral("Plug orientation: %1").arg(port.orientation));
+    if (!port.orientation.empty() && port.orientation != "unknown") {
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "Plug orientation: %s", port.orientation.c_str());
+        s.bullets.emplace_back(buf);
+    }
 
-    // Cable info
     if (cableOpt) {
         const auto &c = *cableOpt;
-        if (c.speed)
-            s.bullets.append(QStringLiteral("Cable speed: %1").arg(cableSpeedLabel(*c.speed)));
-        if (c.currentRating)
-            s.bullets.append(QStringLiteral("Cable current: %1").arg(cableCurrentLabel(*c.currentRating)));
-        if (c.maxWatts > 0)
-            s.bullets.append(QStringLiteral("Cable max power: %1W").arg(c.maxWatts));
+        if (c.speed) {
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "Cable speed: %s", cableSpeedLabel(*c.speed).c_str());
+            s.bullets.emplace_back(buf);
+        }
+        if (c.currentRating) {
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "Cable current: %s", cableCurrentLabel(*c.currentRating).c_str());
+            s.bullets.emplace_back(buf);
+        }
+        if (c.maxWatts > 0) {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "Cable max power: %dW", c.maxWatts);
+            s.bullets.emplace_back(buf);
+        }
         if (c.isActive)
-            s.bullets.append(QStringLiteral("Active cable"));
+            s.bullets.emplace_back("Active cable");
         else if (c.isPassive)
-            s.bullets.append(QStringLiteral("Passive cable"));
-        if (!c.vendorName.isEmpty() && !c.vendorName.startsWith(QStringLiteral("0x")))
-            s.bullets.append(QStringLiteral("Cable vendor: %1").arg(c.vendorName));
+            s.bullets.emplace_back("Passive cable");
+        if (!c.vendorName.empty() && !startsWithHexVid(c.vendorName)) {
+            char buf[160];
+            std::snprintf(buf, sizeof(buf), "Cable vendor: %s", c.vendorName.c_str());
+            s.bullets.emplace_back(buf);
+        }
     }
 
-    // Power Delivery
-    if (pd && !pd->sourceCapabilities.isEmpty()) {
+    if (pd && !pd->sourceCapabilities.empty()) {
         int maxW = pd->maxSourcePowerMW / 1000;
-        s.bullets.append(QStringLiteral("Charger max: %1W").arg(maxW));
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "Charger max: %dW", maxW);
+        s.bullets.emplace_back(buf);
         s.status = Charging;
     }
 
-    // Charging diagnostic
     if (pd) {
         auto diag = ChargingDiagnostic::evaluate(*pd, cableOpt);
         if (diag)

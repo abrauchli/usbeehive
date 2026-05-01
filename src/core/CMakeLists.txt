@@ -15,5 +15,5 @@ add_library(whatcablecore STATIC
 
 set_target_properties(whatcablecore PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(whatcablecore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(whatcablecore PUBLIC Qt6::Core ${UDEV_LIBRARIES})
+target_link_libraries(whatcablecore PUBLIC ${UDEV_LIBRARIES})
 target_include_directories(whatcablecore PRIVATE ${UDEV_INCLUDE_DIRS})

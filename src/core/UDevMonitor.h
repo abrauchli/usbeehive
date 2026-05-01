@@ -2,29 +2,25 @@
 // udev-based hotplug monitoring for USB and Type-C subsystems
 #pragma once
 
-#include <QObject>
-#include <memory>
-
 struct udev;
 struct udev_monitor;
 
 namespace WhatCable {
 
-class UDevMonitor : public QObject {
-    Q_OBJECT
+class UDevMonitor {
 public:
-    explicit UDevMonitor(QObject *parent = nullptr);
-    ~UDevMonitor() override;
+    UDevMonitor();
+    ~UDevMonitor();
 
     bool start();
     void stop();
     bool isRunning() const { return m_running; }
 
-signals:
-    void deviceChanged();
+    /** libudev socket fd for poll(); -1 when not running */
+    int fd() const { return m_running ? m_fd : -1; }
 
-private slots:
-    void onSocketActivated();
+    /** Drain pending kernel messages (call when fd becomes readable). */
+    void drainReceiveQueue();
 
 private:
     udev *m_udev = nullptr;

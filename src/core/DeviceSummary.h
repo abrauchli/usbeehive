@@ -2,14 +2,14 @@
 // Port of PortSummary.swift — generates human-readable summary per device/port
 #pragma once
 
-#include <QString>
-#include <QStringList>
+#include <optional>
+#include <string>
+#include <vector>
 #include "UsbDevice.h"
 #include "TypeCPort.h"
 #include "PowerDelivery.h"
 #include "CableInfo.h"
 #include "ChargingDiagnostic.h"
-#include <optional>
 
 namespace WhatCable {
 
@@ -20,15 +20,13 @@ struct DeviceSummary {
     Category category = UsbDeviceCategory;
     Status status = Empty;
 
-    QString headline;
-    QString subtitle;
-    QStringList bullets;
-    QString icon;
+    std::string headline;
+    std::string subtitle;
+    std::vector<std::string> bullets;
+    std::string icon;
 
-    // From USB device (always present for USB devices)
     std::optional<UsbDevice> usbDevice;
 
-    // From Type-C (present only for USB-C ports)
     std::optional<TypeCPort> typecPort;
     std::optional<PowerDeliveryPort> powerDelivery;
     std::optional<CableInfo> cable;

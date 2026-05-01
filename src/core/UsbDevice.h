@@ -2,10 +2,10 @@
 // Linux equivalent of USBDevice.swift — reads /sys/bus/usb/devices/
 #pragma once
 
-#include <QString>
-#include <QList>
-#include <QMap>
+#include <map>
 #include <optional>
+#include <string>
+#include <vector>
 #include <cstdint>
 
 namespace WhatCable {
@@ -15,20 +15,20 @@ struct UsbInterface {
     uint8_t classCode = 0;
     uint8_t subClass = 0;
     uint8_t protocol = 0;
-    QString driver;
+    std::string driver;
 };
 
 struct UsbDevice {
-    QString sysfsPath;
-    QString busPort;
+    std::string sysfsPath;
+    std::string busPort;
 
     uint16_t vendorId = 0;
     uint16_t productId = 0;
-    QString manufacturer;
-    QString product;
-    QString serial;
+    std::string manufacturer;
+    std::string product;
+    std::string serial;
 
-    QString version;
+    std::string version;
     int speed = 0;        // Mbps
     int maxPowerMA = 0;
 
@@ -40,28 +40,28 @@ struct UsbDevice {
     int devNum = 0;
     int rxLanes = 0;
     int txLanes = 0;
-    QString removable;    // "removable", "fixed", "unknown"
+    std::string removable;    // "removable", "fixed", "unknown"
 
     int numInterfaces = 0;
     int numConfigurations = 0;
 
-    QList<UsbInterface> interfaces;
-    QList<UsbDevice> children;
+    std::vector<UsbInterface> interfaces;
+    std::vector<UsbDevice> children;
 
     bool isHub = false;
     bool isRootHub = false;
 
-    QMap<QString, QString> rawAttributes;
+    std::map<std::string, std::string> rawAttributes;
 
-    QString displayName() const;
-    QString speedLabel() const;
-    QString powerLabel() const;
+    std::string displayName() const;
+    std::string speedLabel() const;
+    std::string powerLabel() const;
 
-    static QList<UsbDevice> enumerate();
+    static std::vector<UsbDevice> enumerate();
 
 private:
-    static std::optional<UsbDevice> fromSysfs(const QString &path, const QString &name);
-    static void buildTopology(QList<UsbDevice> &devices);
+    static std::optional<UsbDevice> fromSysfs(const std::string &path, const std::string &name);
+    static void buildTopology(std::vector<UsbDevice> &devices);
 };
 
 } // namespace WhatCable

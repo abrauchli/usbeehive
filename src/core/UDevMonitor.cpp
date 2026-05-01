@@ -1,14 +1,10 @@
 // Derived from WhatCable by Darryl Morley (https://github.com/darrylmorley/whatcable)
 #include "UDevMonitor.h"
-#include <QSocketNotifier>
 #include <libudev.h>
 
 namespace WhatCable {
 
-UDevMonitor::UDevMonitor(QObject *parent)
-    : QObject(parent)
-{
-}
+UDevMonitor::UDevMonitor() = default;
 
 UDevMonitor::~UDevMonitor()
 {
@@ -44,9 +40,6 @@ bool UDevMonitor::start()
         return false;
     }
 
-    auto *notifier = new QSocketNotifier(m_fd, QSocketNotifier::Read, this);
-    connect(notifier, &QSocketNotifier::activated, this, &UDevMonitor::onSocketActivated);
-
     m_running = true;
     return true;
 }
@@ -56,7 +49,6 @@ void UDevMonitor::stop()
     if (!m_running)
         return;
 
-    // QSocketNotifier destroyed with us via parent ownership
     if (m_monitor) {
         udev_monitor_unref(m_monitor);
         m_monitor = nullptr;
@@ -69,15 +61,17 @@ void UDevMonitor::stop()
     m_fd = -1;
 }
 
-void UDevMonitor::onSocketActivated()
+void UDevMonitor::drainReceiveQueue()
 {
-    auto *dev = udev_monitor_receive_device(m_monitor);
-    if (!dev)
+    if (!m_monitor)
         return;
 
-    // We don't need to inspect the device details — just signal a refresh
-    udev_device_unref(dev);
-    emit deviceChanged();
+    for (;;) {
+        udev_device *dev = udev_monitor_receive_device(m_monitor);
+        if (!dev)
+            break;
+        udev_device_unref(dev);
+    }
 }
 
 } // namespace WhatCable

@@ -4,29 +4,29 @@
 
 namespace WhatCable {
 
-QString productTypeLabel(ProductType type)
+std::string productTypeLabel(ProductType type)
 {
     switch (type) {
-    case ProductType::Hub:          return QStringLiteral("USB Hub");
-    case ProductType::Peripheral:   return QStringLiteral("USB Peripheral");
-    case ProductType::PassiveCable: return QStringLiteral("Passive Cable");
-    case ProductType::ActiveCable:  return QStringLiteral("Active Cable");
-    case ProductType::AMA:          return QStringLiteral("Alternate Mode Adapter");
-    case ProductType::VPD:          return QStringLiteral("VCONN-Powered Device");
-    case ProductType::Other:        return QStringLiteral("Other");
-    default:                        return QStringLiteral("Unknown");
+    case ProductType::Hub:          return "USB Hub";
+    case ProductType::Peripheral:   return "USB Peripheral";
+    case ProductType::PassiveCable: return "Passive Cable";
+    case ProductType::ActiveCable:  return "Active Cable";
+    case ProductType::AMA:          return "Alternate Mode Adapter";
+    case ProductType::VPD:          return "VCONN-Powered Device";
+    case ProductType::Other:        return "Other";
+    default:                        return "Unknown";
     }
 }
 
-QString cableSpeedLabel(CableSpeed speed)
+std::string cableSpeedLabel(CableSpeed speed)
 {
     switch (speed) {
-    case CableSpeed::USB20:     return QStringLiteral("USB 2.0");
-    case CableSpeed::USB32Gen1: return QStringLiteral("USB 3.2 Gen 1 (5 Gbps)");
-    case CableSpeed::USB32Gen2: return QStringLiteral("USB 3.2 Gen 2 (10 Gbps)");
-    case CableSpeed::USB4Gen3:  return QStringLiteral("USB4 Gen 3 (20/40 Gbps)");
-    case CableSpeed::USB4Gen4:  return QStringLiteral("USB4 Gen 4 (40/80 Gbps)");
-    default:                    return QStringLiteral("Unknown");
+    case CableSpeed::USB20:     return "USB 2.0";
+    case CableSpeed::USB32Gen1: return "USB 3.2 Gen 1 (5 Gbps)";
+    case CableSpeed::USB32Gen2: return "USB 3.2 Gen 2 (10 Gbps)";
+    case CableSpeed::USB4Gen3:  return "USB4 Gen 3 (20/40 Gbps)";
+    case CableSpeed::USB4Gen4:  return "USB4 Gen 4 (40/80 Gbps)";
+    default:                    return "Unknown";
     }
 }
 
@@ -42,13 +42,13 @@ int cableSpeedMaxGbps(CableSpeed speed)
     }
 }
 
-QString cableCurrentLabel(CableCurrent current)
+std::string cableCurrentLabel(CableCurrent current)
 {
     switch (current) {
-    case CableCurrent::USBDefault: return QStringLiteral("USB Default");
-    case CableCurrent::ThreeAmp:   return QStringLiteral("3A");
-    case CableCurrent::FiveAmp:    return QStringLiteral("5A");
-    default:                       return QStringLiteral("Unknown");
+    case CableCurrent::USBDefault: return "USB Default";
+    case CableCurrent::ThreeAmp:   return "3A";
+    case CableCurrent::FiveAmp:    return "5A";
+    default:                       return "Unknown";
     }
 }
 
@@ -61,13 +61,6 @@ double cableCurrentMaxAmps(CableCurrent current)
     }
 }
 
-// USB PD 3.x ID Header VDO layout:
-// Bits 31:    USB comm capable as host
-// Bits 30:    USB comm capable as device
-// Bits 29-27: Product type (UFP)
-// Bits 26:    Modal operation
-// Bits 25-23: Product type (DFP)
-// Bits 15-0:  Vendor ID
 IDHeaderVDO decodeIDHeader(uint32_t vdo)
 {
     IDHeaderVDO hdr;
@@ -97,11 +90,6 @@ IDHeaderVDO decodeIDHeader(uint32_t vdo)
     return hdr;
 }
 
-// USB PD 3.x Cable VDO layout:
-// Bits 2-0:   Speed
-// Bits 4:     VBUS through cable
-// Bits 6-5:   Current capability
-// Bits 10-9:  Max VBUS voltage
 CableVDO decodeCableVDO(uint32_t vdo, bool isActive)
 {
     CableVDO cable;

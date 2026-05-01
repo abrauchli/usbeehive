@@ -2,14 +2,14 @@
 // Port of VendorDB.swift — USB VID to vendor name lookup
 #pragma once
 
-#include <QString>
+#include <string>
 #include <cstdint>
 
 namespace WhatCable {
 
 class VendorDB {
 public:
-    static QString lookup(uint16_t vendorId);
+    static std::string lookup(uint16_t vendorId);
 };
 
 } // namespace WhatCable
