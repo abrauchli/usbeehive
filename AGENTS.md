@@ -2,15 +2,14 @@
 
 ## Project Overview
 
-WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable) (macOS) by Darryl Morley. It is a KDE Plasma 6 Plasmoid + CLI tool that shows USB device and USB-C cable information by reading Linux sysfs.
+WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable) (macOS) by Darryl Morley. It is a CLI tool that shows USB device and USB-C cable information by reading Linux sysfs.
 
 ## Architecture
 
-Three components share a single core library:
+Two components share a single core library:
 
-- **`src/core/`** — `libwhatcablecore`, a static C++ library. Reads sysfs, decodes USB PD data, and produces human-readable summaries. No Qt GUI dependencies — only Qt6::Core.
+- **`src/core/`** — `libwhatcablecore`, a static C++ library. Reads sysfs, decodes USB PD data, and produces human-readable summaries. Qt6::Core only (no Qt Widgets / Quick).
 - **`src/cli/`** — `whatcable-linux` CLI binary. Uses the core library. Supports `--json`, `--watch`, `--raw`.
-- **`src/plasmoid/`** — KDE Plasma 6 widget. A C++ QML plugin (`DeviceModel`) wraps the core library's `DeviceManager` as a `QAbstractListModel`. QML files in `contents/ui/` provide the UI.
 
 ## Key Data Flow
 
@@ -23,7 +22,7 @@ Three components share a single core library:
                                     ↓
                               DeviceSummary.cpp (plain-English output)
                                     ↓
-                        CLI (main.cpp)  |  Plasmoid (DeviceModel → QML)
+                              CLI (main.cpp)
 ```
 
 ## Code Conventions
@@ -41,14 +40,11 @@ cmake -B build
 cmake --build build
 ```
 
-The plasmoid is only built when KDE Frameworks 6 dev packages are installed. Without them, the core library and CLI still build fine.
-
 ## Testing
 
 - Run the CLI: `./build/src/cli/whatcable-linux`
 - JSON output: `./build/src/cli/whatcable-linux --json`
 - Watch mode: `./build/src/cli/whatcable-linux --watch`
-- Plasmoid testing: `plasmoidviewer -a build/src/plasmoid` (requires plasma-sdk)
 
 ## Key Files to Know
 
@@ -64,8 +60,6 @@ The plasmoid is only built when KDE Frameworks 6 dev packages are installed. Wit
 | `src/core/UDevMonitor.h/cpp` | libudev hotplug monitoring |
 | `src/core/VendorDB.h/cpp` | USB VID → vendor name lookup |
 | `src/core/UsbClassDB.h/cpp` | USB class code → human name |
-| `src/plasmoid/plugin/DeviceModel.h/cpp` | QAbstractListModel bridging core to QML |
-| `src/plasmoid/contents/ui/main.qml` | Plasmoid entry: compact + full representation |
 
 ## Adding New Vendors
 

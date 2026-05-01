@@ -2,11 +2,9 @@
 
 > **What can this USB cable actually do?**
 
-A KDE Plasma 6 system tray widget and CLI tool that tells you, in plain English, what each USB device plugged into your Linux machine can actually do.
+A command-line tool that tells you, in plain English, what each USB device plugged into your Linux machine can actually do.
 
 **WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** This port expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
-
-![WhatCable-Linux Plasmoid](screenshot.png)
 
 ## What it shows
 
@@ -30,28 +28,32 @@ A KDE Plasma 6 system tray widget and CLI tool that tells you, in plain English,
 
 ### Build from source
 
+Install a C++ toolchain, CMake, pkg-config, Qt 6 Base development files (provides Qt Core for CMake `Qt6::Core`), and libudev development headers.
+
 ```bash
-# Install dependencies (Fedora)
-sudo dnf install cmake extra-cmake-modules qt6-qtbase-devel qt6-qtdeclarative-devel \
-    kf6-kirigami-devel kf6-ki18n-devel kf6-kcoreaddons-devel kf6-kpackage-devel \
-    libplasma-devel plasma-workspace-devel systemd-devel
+# Ubuntu / Debian
+sudo apt install build-essential cmake pkg-config qt6-base-dev libudev-dev
 
-# Install dependencies (Arch/Manjaro)
-sudo pacman -S cmake extra-cmake-modules qt6-base qt6-declarative \
-    kirigami ki18n plasma-workspace systemd-libs kpackage
+# Fedora
+sudo dnf install gcc-c++ cmake pkgconf-pkg-config qt6-qtbase-devel systemd-devel
 
-# Build
-cmake -B build -DCMAKE_INSTALL_PREFIX=/usr
-cmake --build build
-sudo cmake --install build
-
-# Or install just the plasmoid for your user
-kpackagetool6 -t Plasma/Applet -i build/pkg/org.kde.whatcable
+# Arch / Manjaro
+sudo pacman -S --needed base-devel cmake pkgconf qt6-base systemd-libs
 ```
 
-### CLI only
+The Ubuntu package `qt6-base-dev` bundles Qt Core headers and CMake config alongside other qtbase modules; this project links **only** `Qt6::Core`, not Qt Widgets or Qt Quick.
 
-After building, the `whatcable-linux` binary is in `build/src/cli/`:
+Build and optionally install:
+
+```bash
+cmake -B build -DCMAKE_INSTALL_PREFIX=/usr
+cmake --build build
+sudo cmake --install build   # optional
+```
+
+The `whatcable-linux` binary is `build/src/cli/whatcable-linux` if you skip install.
+
+### Usage
 
 ```bash
 whatcable-linux              # human-readable summary of every USB device
