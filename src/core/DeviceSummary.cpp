@@ -5,6 +5,7 @@
 #include "UsbClassDB.h"
 #include "PDDecoder.h"
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 
 namespace WhatCable {
@@ -31,6 +32,23 @@ std::string joinComma(const std::vector<std::string> &v)
         out += v[i];
     }
     return out;
+}
+
+std::string powerContractLabel(const TypeCPowerSupply &psy)
+{
+    if (!psy.voltageNowUV || !psy.currentNowUA)
+        return {};
+
+    const double volts = *psy.voltageNowUV / 1000000.0;
+    const double amps = *psy.currentNowUA / 1000000.0;
+    const int watts = static_cast<int>(
+        (static_cast<int64_t>(*psy.voltageNowUV) * *psy.currentNowUA + 500000000000LL) /
+        1000000000000LL);
+
+    char buf[128];
+    std::snprintf(buf, sizeof(buf), "Negotiated power: %.1fV @ %.2fA — %dW",
+                  volts, amps, watts);
+    return buf;
 }
 
 } // namespace
@@ -176,6 +194,12 @@ DeviceSummary DeviceSummary::fromTypeCPort(
         char buf[128];
         std::snprintf(buf, sizeof(buf), "Power mode: %s", port.powerOpMode.c_str());
         s.bullets.emplace_back(buf);
+    }
+
+    if (port.powerSupply && port.powerSupply->online) {
+        std::string contract = powerContractLabel(*port.powerSupply);
+        if (!contract.empty())
+            s.bullets.push_back(contract);
     }
 
     if (!port.pdRevision.empty()) {

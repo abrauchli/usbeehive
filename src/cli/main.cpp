@@ -349,6 +349,76 @@ std::string deviceToJson(const DeviceSummary &dev, bool showRaw, int depth)
                 jsonNlIndent(s, d2);
                 s += std::string("\"connected\": ") + (tc.isConnected() ? "true" : "false");
             });
+            if (tc.powerSupply) {
+                const TypeCPowerSupply &psy = *tc.powerSupply;
+                emitTc([&] {
+                    jsonNlIndent(s, d2);
+                    s += "\"powerSupply\": {";
+                    bool psyComma = false;
+                    auto emitPsy = [&](auto &&fn) {
+                        if (psyComma)
+                            s += ',';
+                        psyComma = true;
+                        fn();
+                    };
+                    emitPsy([&] {
+                        jsonNlIndent(s, d3);
+                        s += "\"name\": " + jsonQuoted(psy.name);
+                    });
+                    emitPsy([&] {
+                        jsonNlIndent(s, d3);
+                        s += std::string("\"online\": ") + (psy.online ? "true" : "false");
+                    });
+                    if (psy.voltageNowUV) {
+                        emitPsy([&] {
+                            jsonNlIndent(s, d3);
+                            s += "\"voltageNowUV\": " + std::to_string(*psy.voltageNowUV);
+                        });
+                    }
+                    if (psy.currentNowUA) {
+                        emitPsy([&] {
+                            jsonNlIndent(s, d3);
+                            s += "\"currentNowUA\": " + std::to_string(*psy.currentNowUA);
+                        });
+                    }
+                    if (psy.currentMaxUA) {
+                        emitPsy([&] {
+                            jsonNlIndent(s, d3);
+                            s += "\"currentMaxUA\": " + std::to_string(*psy.currentMaxUA);
+                        });
+                    }
+                    if (psy.voltageMinUV) {
+                        emitPsy([&] {
+                            jsonNlIndent(s, d3);
+                            s += "\"voltageMinUV\": " + std::to_string(*psy.voltageMinUV);
+                        });
+                    }
+                    if (psy.voltageMaxUV) {
+                        emitPsy([&] {
+                            jsonNlIndent(s, d3);
+                            s += "\"voltageMaxUV\": " + std::to_string(*psy.voltageMaxUV);
+                        });
+                    }
+                    if (psy.voltageNowUV && psy.currentNowUA) {
+                        const int64_t mw = static_cast<int64_t>(*psy.voltageNowUV) *
+                            *psy.currentNowUA / 1000000000LL;
+                        emitPsy([&] {
+                            jsonNlIndent(s, d3);
+                            s += "\"negotiatedPowerMW\": " + std::to_string(mw);
+                        });
+                    }
+                    emitPsy([&] {
+                        jsonNlIndent(s, d3);
+                        s += "\"chargeType\": " + jsonQuoted(psy.chargeType);
+                    });
+                    emitPsy([&] {
+                        jsonNlIndent(s, d3);
+                        s += "\"usbType\": " + jsonQuoted(psy.usbType);
+                    });
+                    jsonNlIndent(s, d2);
+                    s += '}';
+                });
+            }
             if (showRaw) {
                 emitTc([&] {
                     jsonNlIndent(s, d2);

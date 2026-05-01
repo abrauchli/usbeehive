@@ -80,6 +80,47 @@ std::optional<TypeCIdentity> TypeCPort::readIdentity(const std::string &path)
     return id;
 }
 
+std::optional<TypeCPowerSupply> readUcsiPowerSupply(const std::string &portPath, int portNumber)
+{
+    if (portNumber < 0)
+        return std::nullopt;
+
+    std::error_code ec;
+    const fs::path resolved = fs::canonical(fs::path(portPath), ec);
+    if (ec)
+        return std::nullopt;
+
+    std::string controller;
+    static const std::regex controllerRe(R"((USBC[0-9A-Fa-f]+:[0-9A-Fa-f]+))");
+    std::smatch match;
+    const std::string resolvedStr = resolved.string();
+    if (std::regex_search(resolvedStr, match, controllerRe) && match.size() > 1)
+        controller = match[1].str();
+    if (controller.empty())
+        return std::nullopt;
+
+    const std::string psyPath = "/sys/class/power_supply/ucsi-source-psy-" +
+        controller + std::to_string(portNumber + 1);
+    if (!SysfsReader::pathExists(psyPath))
+        return std::nullopt;
+
+    TypeCPowerSupply psy;
+    psy.sysfsPath = psyPath;
+    psy.name = fs::path(psyPath).filename().string();
+    auto online = SysfsReader::readIntAttribute(psyPath + "/online");
+    psy.online = online.value_or(0) != 0;
+    psy.voltageNowUV = SysfsReader::readIntAttribute(psyPath + "/voltage_now");
+    psy.currentNowUA = SysfsReader::readIntAttribute(psyPath + "/current_now");
+    psy.currentMaxUA = SysfsReader::readIntAttribute(psyPath + "/current_max");
+    psy.voltageMinUV = SysfsReader::readIntAttribute(psyPath + "/voltage_min");
+    psy.voltageMaxUV = SysfsReader::readIntAttribute(psyPath + "/voltage_max");
+    psy.chargeType = SysfsReader::readAttribute(psyPath + "/charge_type");
+    psy.usbType = SysfsReader::readAttribute(psyPath + "/usb_type");
+    psy.rawAttributes = SysfsReader::readAllAttributes(psyPath);
+
+    return psy;
+}
+
 std::optional<TypeCPort> TypeCPort::fromSysfs(const std::string &path, const std::string &name)
 {
     if (!name.starts_with("port"))
@@ -101,6 +142,7 @@ std::optional<TypeCPort> TypeCPort::fromSysfs(const std::string &path, const std
     port.orientation = SysfsReader::readAttribute(path + "/orientation");
     port.pdRevision = SysfsReader::readAttribute(path + "/usb_power_delivery_revision");
     port.usbTypeCRev = SysfsReader::readAttribute(path + "/usb_typec_revision");
+    port.powerSupply = readUcsiPowerSupply(path, port.portNumber);
 
     const std::string partnerPath = path + "-partner";
     if (SysfsReader::pathExists(partnerPath)) {

@@ -29,6 +29,20 @@ struct TypeCCable {
     std::map<std::string, std::string> rawAttributes;
 };
 
+struct TypeCPowerSupply {
+    std::string sysfsPath;
+    std::string name;
+    bool online = false;
+    std::optional<int> voltageNowUV;
+    std::optional<int> currentNowUA;
+    std::optional<int> currentMaxUA;
+    std::optional<int> voltageMinUV;
+    std::optional<int> voltageMaxUV;
+    std::string chargeType;
+    std::string usbType;
+    std::map<std::string, std::string> rawAttributes;
+};
+
 struct TypeCPort {
     std::string sysfsPath;
     std::string portName;      // "port0", "port1", ...
@@ -41,6 +55,7 @@ struct TypeCPort {
     std::string orientation;   // "normal", "reverse", "unknown"
     std::string pdRevision;
     std::string usbTypeCRev;
+    std::optional<TypeCPowerSupply> powerSupply;
 
     bool hasPartner = false;
     std::optional<TypeCPartner> partner;
