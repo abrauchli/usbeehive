@@ -8,7 +8,7 @@ description = "Tells you what each USB cable / device on Linux can actually do. 
 repository = "https://github.com/Zetaphor/whatcable-linux"
 homepage = "https://github.com/Zetaphor/whatcable-linux"
 readme = "README.md"
-rust-version = "1.74"
+rust-version = "1.85"
 keywords = ["usb", "usb-c", "power-delivery", "sysfs", "cli"]
 categories = ["command-line-utilities", "hardware-support", "os::linux-apis"]
 

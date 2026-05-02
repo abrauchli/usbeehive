@@ -57,7 +57,8 @@ go `default-features = false` and get a `serde`-only build.
 
 ## Code conventions
 
-- Rust 2021, MSRV 1.74. Crate-level `#![warn(missing_docs)]`,
+- Rust 2021 edition, MSRV 1.85 (driven by transitive `clap_lex` requiring
+  edition 2024). Crate-level `#![warn(missing_docs)]`,
   `#![deny(unsafe_code)]` (the watch module re-allows unsafe locally to
   call `libc::poll` / `libc::signal`).
 - All sysfs reads go through `crate::sysfs::reader` — never read `/sys/`

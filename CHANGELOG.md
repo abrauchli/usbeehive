@@ -40,7 +40,7 @@ binary name (`whatcable`).
   cable-bottleneck detection.
 - New CI workflow (`.github/workflows/ci.yml`): test matrix
   (default + `--no-default-features`), `cargo fmt --check`, `cargo clippy
-  --all-targets -D warnings`, MSRV (1.74) build, rustdoc with `-D warnings`.
+  --all-targets -D warnings`, MSRV (1.85) build, rustdoc with `-D warnings`.
 - Crate-level doc comments on every public item; runnable doctest in `lib.rs`.
 - This `CHANGELOG.md`.
 

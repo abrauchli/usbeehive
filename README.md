@@ -43,7 +43,7 @@ cargo install whatcable
 
 ### Build from source
 
-Requires Rust 1.74+ ([rustup](https://rustup.rs)) and `libudev` development
+Requires Rust 1.85+ ([rustup](https://rustup.rs)) and `libudev` development
 headers (for `--watch` hotplug support, on by default).
 
 ```bash
