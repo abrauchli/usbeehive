@@ -1,5 +1,16 @@
-//! USB base class code → human-readable label.
+//! USB base-class code → human-readable label.
+//!
+//! Mapping follows the USB-IF "Defined Class Codes" registry. Unknown codes
+//! return their hex representation (`"0xaa"`) so log output stays readable.
 
+/// Return a label for the USB base class `code`. Unknown values fall back to
+/// a `"0x..."` hex string.
+///
+/// ```
+/// use whatcable_core::usbclass::class_name;
+/// assert_eq!(class_name(0x09), "Hub");
+/// assert_eq!(class_name(0xAA), "0xaa");
+/// ```
 pub fn class_name(code: u8) -> String {
     match code {
         0x00 => "Composite",
@@ -37,10 +48,12 @@ mod tests {
     fn known_classes() {
         assert_eq!(class_name(0x09), "Hub");
         assert_eq!(class_name(0x03), "HID");
+        assert_eq!(class_name(0x08), "Mass Storage");
     }
 
     #[test]
     fn unknown_class_is_hex() {
         assert_eq!(class_name(0xAA), "0xaa");
+        assert_eq!(class_name(0x42), "0x42");
     }
 }

@@ -1,51 +1,94 @@
-//! USB Power Delivery 3.x VDO bit-field decoders.
+//! USB Power Delivery 3.x VDO decoders.
 //!
-//! Ported from the original WhatCable Swift implementation. See USB PD R3
-//! specification, "Discover Identity" responses.
+//! USB-PD partners exchange capability information through 32-bit *Vendor
+//! Defined Objects* (VDOs). This module decodes the bit-fields defined by
+//! the USB Power Delivery R3.x specification's "Discover Identity" command:
+//!
+//! - [`decode_id_header`] — parses the **ID Header VDO** (always the first
+//!   VDO of a Discover Identity response).
+//! - [`decode_cable_vdo`] — parses a **Cable VDO** (passive cables: 4th VDO;
+//!   active cables: 4th and 5th VDOs).
+//!
+//! Decoders are pure functions: hand them a `u32` and they return strongly
+//! typed enums. They never read sysfs, never panic, and never allocate.
+//!
+//! # Example
+//!
+//! ```
+//! use whatcable_core::pd::{decode_cable_vdo, CableSpeed, CableCurrent};
+//!
+//! // CableVDO bits: speed=2 (USB 3.2 Gen 2), current=2 (5A), max VBUS=3 (50V)
+//! let raw = 2u32 | (2 << 5) | (3 << 9);
+//! let v = decode_cable_vdo(raw, /* is_active = */ false);
+//! assert_eq!(v.speed, CableSpeed::Usb32Gen2);
+//! assert_eq!(v.current_rating, CableCurrent::FiveAmp);
+//! assert_eq!(v.max_vbus_volts, 50);
+//! assert_eq!(v.max_watts, 250);
+//! ```
 
 use serde::Serialize;
 
+/// The kind of USB-PD product reported in a `Discover Identity` ID Header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ProductType {
+    /// Field absent or reserved.
     Undefined,
+    /// USB hub.
     Hub,
+    /// USB peripheral (storage, HID, audio, …).
     Peripheral,
+    /// Passive USB-C cable assembly.
     PassiveCable,
+    /// Active USB-C cable assembly (powered re-driver / re-timer).
     ActiveCable,
-    /// Alternate Mode Adapter
+    /// Alternate Mode Adapter (AMA).
     Ama,
-    /// VCONN-Powered Device
+    /// VCONN-Powered Device (VPD).
     Vpd,
+    /// Reserved or vendor-specific value not interpreted.
     Other,
 }
 
+/// USB data-rate capability advertised in a Cable VDO.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CableSpeed {
+    /// USB 2.0 (480 Mbps), or no SuperSpeed support advertised.
     Usb20,
-    /// 5 Gbps
+    /// USB 3.2 Gen 1 — 5 Gbps single lane.
     Usb32Gen1,
-    /// 10 Gbps
+    /// USB 3.2 Gen 2 — 10 Gbps single lane.
     Usb32Gen2,
-    /// 20 Gbps single-lane / 40 Gbps dual-lane
+    /// USB4 Gen 3 — 20 Gbps single lane / 40 Gbps dual lane.
     Usb4Gen3,
-    /// 40 Gbps single-lane / 80 Gbps dual-lane
+    /// USB4 Gen 4 — 40 Gbps single lane / 80 Gbps dual lane.
     Usb4Gen4,
 }
 
+/// VBUS current rating advertised by a cable's e-marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum CableCurrent {
+    /// USB Default — only nominal 5V @ 0.9A guaranteed.
     UsbDefault,
+    /// 3 A rating (60W at 20V VBUS).
     ThreeAmp,
+    /// 5 A rating (100W at 20V, 240W at 48V).
     FiveAmp,
 }
 
+/// Decoded fields of an ID Header VDO.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct IdHeaderVdo {
+    /// USB Communications Capable as Host (DFP).
     pub usb_comm_capable_as_host: bool,
+    /// USB Communications Capable as Device (UFP).
     pub usb_comm_capable_as_device: bool,
+    /// Modal Operation Supported (i.e. supports Alternate Modes).
     pub modal_operation: bool,
+    /// Product type advertised in the UFP role, if recognized.
     pub ufp_product_type: Option<ProductType>,
+    /// Product type advertised in the DFP role, if recognized.
     pub dfp_product_type: Option<ProductType>,
+    /// Cable / device vendor ID (low 16 bits of the VDO).
     pub vendor_id: u16,
 }
 
@@ -55,16 +98,24 @@ impl Default for ProductType {
     }
 }
 
+/// Decoded fields of a Cable VDO.
 #[derive(Debug, Clone, Copy)]
 pub struct CableVdo {
+    /// Maximum link speed supported by the cable.
     pub speed: CableSpeed,
+    /// Maximum VBUS current rating.
     pub current_rating: CableCurrent,
+    /// `true` when the cable carries VBUS through to the partner.
     pub vbus_through_cable: bool,
+    /// Maximum VBUS voltage supported, in volts (20, 30, 40, or 50).
     pub max_vbus_volts: u32,
+    /// `true` when the cable is electrically active (re-driver / re-timer).
     pub is_active: bool,
+    /// Convenience product of `current_rating` × `max_vbus_volts`, in watts.
     pub max_watts: u32,
 }
 
+/// Human-readable label for a [`ProductType`].
 pub fn product_type_label(t: ProductType) -> &'static str {
     match t {
         ProductType::Hub => "USB Hub",
@@ -78,6 +129,7 @@ pub fn product_type_label(t: ProductType) -> &'static str {
     }
 }
 
+/// Human-readable label for a [`CableSpeed`].
 pub fn cable_speed_label(s: CableSpeed) -> &'static str {
     match s {
         CableSpeed::Usb20 => "USB 2.0",
@@ -88,6 +140,9 @@ pub fn cable_speed_label(s: CableSpeed) -> &'static str {
     }
 }
 
+/// Headline single-lane Gbps figure for a [`CableSpeed`].
+///
+/// Returns 0 for [`CableSpeed::Usb20`].
 pub fn cable_speed_max_gbps(s: CableSpeed) -> u32 {
     match s {
         CableSpeed::Usb20 => 0,
@@ -98,6 +153,7 @@ pub fn cable_speed_max_gbps(s: CableSpeed) -> u32 {
     }
 }
 
+/// Human-readable label for a [`CableCurrent`].
 pub fn cable_current_label(c: CableCurrent) -> &'static str {
     match c {
         CableCurrent::UsbDefault => "USB Default",
@@ -106,6 +162,7 @@ pub fn cable_current_label(c: CableCurrent) -> &'static str {
     }
 }
 
+/// Numeric ampere figure for a [`CableCurrent`].
 pub fn cable_current_max_amps(c: CableCurrent) -> f64 {
     match c {
         CableCurrent::UsbDefault => 0.9,
@@ -134,6 +191,9 @@ fn dfp_from_bits(bits: u32) -> Option<ProductType> {
     }
 }
 
+/// Decode the ID Header VDO into typed fields.
+///
+/// See USB-PD R3.x § 6.4.4.2.1.
 pub fn decode_id_header(vdo: u32) -> IdHeaderVdo {
     IdHeaderVdo {
         usb_comm_capable_as_host: (vdo >> 31) & 1 != 0,
@@ -145,6 +205,14 @@ pub fn decode_id_header(vdo: u32) -> IdHeaderVdo {
     }
 }
 
+/// Decode a Cable VDO.
+///
+/// `is_active` should be set from the partner's reported product type — the
+/// resulting [`CableVdo::is_active`] field will be the same value, threaded
+/// through for convenience.
+///
+/// See USB-PD R3.x § 6.4.4.3.1 (Passive Cable VDO) and § 6.4.4.3.1.1
+/// (Active Cable VDO).
 pub fn decode_cable_vdo(vdo: u32, is_active: bool) -> CableVdo {
     let speed = match vdo & 0x7 {
         1 => CableSpeed::Usb32Gen1,
@@ -188,9 +256,14 @@ mod tests {
 
     #[test]
     fn id_header_active_cable_ufp() {
-        // Bits 27..29 = 4 -> ActiveCable
         let h = decode_id_header(4 << 27);
         assert_eq!(h.ufp_product_type, Some(ProductType::ActiveCable));
+    }
+
+    #[test]
+    fn id_header_dfp_field() {
+        let h = decode_id_header(2 << 23);
+        assert_eq!(h.dfp_product_type, Some(ProductType::Peripheral));
     }
 
     #[test]
@@ -202,8 +275,14 @@ mod tests {
     }
 
     #[test]
+    fn id_header_unknown_product_type_is_none() {
+        // bits 27..29 = 7 → reserved
+        let h = decode_id_header(7 << 27);
+        assert_eq!(h.ufp_product_type, None);
+    }
+
+    #[test]
     fn cable_vdo_decodes_speed_current_voltage() {
-        // speed=2 (Gen2), current=1 (3A), voltage=0 (20V)
         let v = decode_cable_vdo(2 | (1 << 5), false);
         assert_eq!(v.speed, CableSpeed::Usb32Gen2);
         assert_eq!(v.current_rating, CableCurrent::ThreeAmp);
@@ -213,7 +292,7 @@ mod tests {
     }
 
     #[test]
-    fn cable_vdo_5a_50v_marks_240w() {
+    fn cable_vdo_5a_50v_marks_250w() {
         let v = decode_cable_vdo((2 << 5) | (3 << 9), true);
         assert_eq!(v.current_rating, CableCurrent::FiveAmp);
         assert_eq!(v.max_vbus_volts, 50);
@@ -228,10 +307,19 @@ mod tests {
     }
 
     #[test]
+    fn cable_vdo_vbus_through_bit() {
+        let v = decode_cable_vdo(1 << 4, false);
+        assert!(v.vbus_through_cable);
+        let v = decode_cable_vdo(0, false);
+        assert!(!v.vbus_through_cable);
+    }
+
+    #[test]
     fn label_helpers() {
         assert_eq!(product_type_label(ProductType::Hub), "USB Hub");
         assert_eq!(cable_speed_label(CableSpeed::Usb4Gen4), "USB4 Gen 4 (40/80 Gbps)");
         assert_eq!(cable_speed_max_gbps(CableSpeed::Usb32Gen1), 5);
+        assert_eq!(cable_speed_max_gbps(CableSpeed::Usb20), 0);
         assert_eq!(cable_current_label(CableCurrent::FiveAmp), "5A");
         assert!((cable_current_max_amps(CableCurrent::ThreeAmp) - 3.0).abs() < 1e-9);
     }

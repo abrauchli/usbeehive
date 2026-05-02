@@ -1,36 +1,32 @@
-[package]
-name = "whatcable"
-version = "0.2.1"
+[workspace]
+resolver = "2"
+members = [
+    "crates/whatcable-core",
+    "crates/whatcable-sysfs",
+    "crates/whatcable-watch",
+    "crates/whatcable-cli",
+]
+
+[workspace.package]
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
-description = "Tells you what each USB cable/device on Linux can actually do. Rust port of WhatCable."
+authors = ["Andreas Brauchli"]
 repository = "https://github.com/Zetaphor/whatcable-linux"
 homepage = "https://github.com/Zetaphor/whatcable-linux"
-readme = "README.md"
 rust-version = "1.74"
 keywords = ["usb", "usb-c", "power-delivery", "sysfs", "cli"]
 categories = ["command-line-utilities", "hardware-support", "os::linux-apis"]
 
-[[bin]]
-name = "whatcable-linux"
-path = "src/main.rs"
-
-[lib]
-name = "whatcable"
-path = "src/lib.rs"
-
-[dependencies]
-clap = { version = "4", features = ["derive"] }
+[workspace.dependencies]
+whatcable-core = { version = "0.3.0", path = "crates/whatcable-core" }
+whatcable-sysfs = { version = "0.3.0", path = "crates/whatcable-sysfs" }
+whatcable-watch = { version = "0.3.0", path = "crates/whatcable-watch" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-udev = { version = "0.9", optional = true }
+clap = { version = "4", features = ["derive"] }
+udev = "0.9"
 libc = "0.2"
-
-[features]
-default = ["watch"]
-# `watch` enables the libudev hotplug monitor and `--watch` mode. Requires
-# libudev development headers (libudev-dev / systemd-devel) at build time.
-watch = ["dep:udev"]
 
 [profile.release]
 lto = "thin"

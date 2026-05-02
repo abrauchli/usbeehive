@@ -49,7 +49,7 @@ Build:
 ```bash
 cargo build --release                              # default (with --watch)
 cargo build --release --no-default-features        # without libudev / --watch
-sudo install -Dm755 target/release/whatcable-linux /usr/local/bin/whatcable-linux
+sudo install -Dm755 target/release/whatcable /usr/local/bin/whatcable
 ```
 
 ### Tests
@@ -62,12 +62,12 @@ cargo test                          # full suite, requires libudev-dev
 ### Usage
 
 ```bash
-whatcable-linux              # human-readable summary of every USB device
-whatcable-linux --json       # structured JSON output
-whatcable-linux --watch      # stream updates as devices come and go
-whatcable-linux --raw        # include raw sysfs attributes
-whatcable-linux --version
-whatcable-linux --help
+whatcable              # human-readable summary of every USB device
+whatcable --json       # structured JSON output
+whatcable --watch      # stream updates as devices come and go
+whatcable --raw        # include raw sysfs attributes
+whatcable --version
+whatcable --help
 ```
 
 ## How it works

@@ -1,0 +1,20 @@
+[package]
+name = "whatcable-sysfs"
+description = "Linux sysfs backend for WhatCable — enumerates USB / Type-C / PD into whatcable-core types."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+whatcable-core = { workspace = true }
+serde = { workspace = true }
+
+[lints.rust]
+missing_docs = "warn"

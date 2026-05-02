@@ -1,28 +1,47 @@
 //! Charging-bottleneck diagnostic.
+//!
+//! Looks at a [`PowerDeliveryPort`] (charger advertisement + active contract)
+//! plus the optional cable view, and produces a [`ChargingDiagnostic`] that
+//! identifies the limiting factor.
 
 use serde::Serialize;
 
 use crate::cable::CableInfo;
 use crate::power::PowerDeliveryPort;
 
+/// Categorical reason a USB-C port may not be charging at full speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Bottleneck {
+    /// No charger detected (or no source PDOs).
     NoCharger,
+    /// Charger is offering less than expected.
     ChargerLimit,
+    /// Cable e-marker advertises lower wattage than the charger can deliver.
     CableLimit,
+    /// The downstream device is requesting less than the charger can deliver.
     DeviceLimit,
+    /// Charging is at the charger's maximum.
     Fine,
 }
 
+/// Result of [`ChargingDiagnostic::evaluate`].
 #[derive(Debug, Clone, Serialize)]
 pub struct ChargingDiagnostic {
+    /// Categorical bottleneck classification.
     pub bottleneck: Bottleneck,
+    /// One-line headline (`"Cable is limiting charging speed"`).
     pub summary: String,
+    /// Optional second-line detail.
     pub detail: String,
+    /// `true` when the bottleneck is user-actionable (i.e. swap the cable).
     pub is_warning: bool,
 }
 
 impl ChargingDiagnostic {
+    /// Compute a diagnostic for `pd_port`, optionally informed by `cable`.
+    ///
+    /// Returns `None` when no source capabilities are advertised — without
+    /// that we have no charger reference to compare against.
     pub fn evaluate(
         pd_port: &PowerDeliveryPort,
         cable: Option<&CableInfo>,
@@ -103,8 +122,14 @@ mod tests {
     }
 
     #[test]
+    fn zero_charger_returns_none() {
+        let port = pd(vec![pdo(0, false)]);
+        assert!(ChargingDiagnostic::evaluate(&port, None).is_none());
+    }
+
+    #[test]
     fn cable_limit_flagged_with_warning() {
-        let port = pd(vec![pdo(100_000, true)]); // 100W charger
+        let port = pd(vec![pdo(100_000, true)]);
         let cable = CableInfo {
             max_watts: 60,
             ..Default::default()
@@ -117,7 +142,7 @@ mod tests {
 
     #[test]
     fn device_limit_when_active_below_80pct() {
-        let port = pd(vec![pdo(100_000, false), pdo(15_000, true)]); // 15W active vs 100W max
+        let port = pd(vec![pdo(100_000, false), pdo(15_000, true)]);
         let d = ChargingDiagnostic::evaluate(&port, None).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::DeviceLimit);
         assert!(!d.is_warning);
@@ -130,5 +155,17 @@ mod tests {
         let d = ChargingDiagnostic::evaluate(&port, None).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::Fine);
         assert!(d.summary.contains("60W"));
+    }
+
+    #[test]
+    fn fine_when_no_active_pdo_uses_max() {
+        let port = pd(vec![pdo(100_000, false)]);
+        let cable = CableInfo {
+            max_watts: 240,
+            ..Default::default()
+        };
+        let d = ChargingDiagnostic::evaluate(&port, Some(&cable)).unwrap();
+        assert_eq!(d.bottleneck, Bottleneck::Fine);
+        assert!(d.summary.contains("100W"));
     }
 }

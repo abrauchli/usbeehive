@@ -1,8 +1,17 @@
 //! USB Implementers Forum vendor ID lookup.
 //!
-//! Tiny static table — covers the vendors most likely to appear in a typical
-//! Linux USB tree. Unknown VIDs fall back to a hex string.
+//! A small static table covering vendors most commonly seen in a typical
+//! Linux USB tree. Unknown VIDs return a hex fallback string ([`is_hex_fallback`]
+//! identifies these so callers can suppress vendor labelling for them).
 
+/// Look up a USB Vendor ID. Returns the canonical vendor name, or a
+/// `"0x...."` hex string if the VID isn't in the bundled table.
+///
+/// ```
+/// use whatcable_core::vendor::lookup;
+/// assert_eq!(lookup(0x05AC), "Apple");
+/// assert_eq!(lookup(0xDEAD), "0xdead");
+/// ```
 pub fn lookup(vid: u16) -> String {
     match vid {
         0x05AC => "Apple",
@@ -63,8 +72,8 @@ pub fn lookup(vid: u16) -> String {
     .to_string()
 }
 
-/// True when `lookup`'s output is the synthetic hex fallback rather than a
-/// real vendor name.
+/// `true` when [`lookup`]'s output is the synthetic hex fallback rather than
+/// a real vendor name.
 pub fn is_hex_fallback(name: &str) -> bool {
     let b = name.as_bytes();
     b.len() >= 2 && b[0] == b'0' && (b[1] == b'x' || b[1] == b'X')
@@ -91,5 +100,6 @@ mod tests {
     #[test]
     fn real_name_is_not_hex_fallback() {
         assert!(!is_hex_fallback("Apple"));
+        assert!(!is_hex_fallback(""));
     }
 }

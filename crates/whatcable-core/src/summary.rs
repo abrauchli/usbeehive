@@ -1,4 +1,8 @@
-//! Plain-English summary per device or Type-C port.
+//! Plain-English summary of a USB device or Type-C port.
+//!
+//! [`DeviceSummary`] is a CLI-friendly view: a headline, subtitle, bullet
+//! list, and an icon hint, plus the raw structured data it was derived from.
+//! It is the high-level façade most consumers will reach for.
 
 use serde::Serialize;
 
@@ -11,33 +15,53 @@ use crate::usb::UsbDevice;
 use crate::usbclass;
 use crate::vendor;
 
+/// High-level grouping a [`DeviceSummary`] belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Category {
+    /// Plain USB peripheral.
     UsbDevice,
+    /// USB Type-C port (with or without a partner attached).
     TypeCPort,
+    /// USB hub (anything with `device_class == 0x09`).
     Hub,
 }
 
+/// Connection status surfaced to the UI layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Status {
+    /// Type-C port with nothing attached.
     Empty,
+    /// Connected (no PD source advertised).
     Connected,
+    /// Connected and currently being charged from a PD source.
     Charging,
 }
 
+/// One renderable summary entry.
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceSummary {
+    /// High-level grouping for color/iconography.
     pub category: Category,
+    /// Connection state.
     pub status: Status,
+    /// Single-line title (e.g. `"USB-C Port 0"` or the product string).
     pub headline: String,
+    /// Single-line subtitle (vendor + class).
     pub subtitle: String,
+    /// Body lines.
     pub bullets: Vec<String>,
+    /// Suggested freedesktop icon name for an icon theme.
     pub icon: String,
 
+    /// Original USB device, if this summary describes one.
     pub usb_device: Option<UsbDevice>,
+    /// Original Type-C port, if this summary describes one.
     pub typec_port: Option<TypeCPort>,
+    /// Companion PD port for `typec_port`.
     pub power_delivery: Option<PowerDeliveryPort>,
+    /// Decoded cable info attached to `typec_port`.
     pub cable: Option<CableInfo>,
+    /// Computed charging diagnostic.
     pub charging_diag: Option<ChargingDiagnostic>,
 }
 
@@ -49,7 +73,6 @@ fn power_contract_label(psy: &TypeCPowerSupply) -> Option<String> {
     }
     let volts = v_uv as f64 / 1_000_000.0;
     let amps = i_ua as f64 / 1_000_000.0;
-    // Round to nearest watt: (vµV * iµA + 0.5e12) / 1e12
     let watts = ((v_uv as i128 * i_ua as i128 + 500_000_000_000) / 1_000_000_000_000) as i64;
     Some(format!(
         "Negotiated power: {volts:.1}V @ {amps:.2}A — {watts}W"
@@ -78,6 +101,7 @@ fn icon_for(device_type: &str, is_hub: bool) -> &'static str {
 }
 
 impl DeviceSummary {
+    /// Build a summary for a [`UsbDevice`].
     pub fn from_usb_device(dev: &UsbDevice) -> DeviceSummary {
         let vendor_name = vendor::lookup(dev.vendor_id);
         let has_vendor = !vendor::is_hex_fallback(&vendor_name);
@@ -151,6 +175,8 @@ impl DeviceSummary {
         }
     }
 
+    /// Build a summary for a [`TypeCPort`], optionally enriched with the
+    /// companion PD port and cable view.
     pub fn from_typec_port(
         port: &TypeCPort,
         pd: Option<PowerDeliveryPort>,
@@ -323,6 +349,32 @@ mod tests {
     }
 
     #[test]
+    fn charging_status_when_pd_source_present() {
+        use crate::power::{PdoType, PowerDataObject, PowerDeliveryPort};
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![PowerDataObject {
+                r#type: PdoType::FixedSupply,
+                voltage_mv: 20_000,
+                current_ma: 5_000,
+                power_mw: 100_000,
+                is_active: true,
+                ..Default::default()
+            }],
+            max_source_power_mw: 100_000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        assert_eq!(s.status, Status::Charging);
+        assert!(s.bullets.iter().any(|b| b.contains("Charger max: 100W")));
+        assert!(s.charging_diag.is_some());
+    }
+
+    #[test]
     fn power_contract_rounds_watts() {
         let psy = TypeCPowerSupply {
             online: true,
@@ -334,5 +386,30 @@ mod tests {
         assert!(label.contains("9.0V"));
         assert!(label.contains("2.00A"));
         assert!(label.ends_with("18W"));
+    }
+
+    #[test]
+    fn cable_bullets_appear() {
+        use crate::pd::{CableCurrent, CableSpeed};
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            cable_type: "passive".into(),
+            speed: Some(CableSpeed::Usb32Gen2),
+            current_rating: Some(CableCurrent::FiveAmp),
+            max_watts: 100,
+            is_passive: true,
+            vendor_name: "Apple".into(),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable));
+        assert!(s.bullets.iter().any(|b| b.contains("USB 3.2 Gen 2")));
+        assert!(s.bullets.iter().any(|b| b.contains("Cable current: 5A")));
+        assert!(s.bullets.iter().any(|b| b == "Cable max power: 100W"));
+        assert!(s.bullets.iter().any(|b| b == "Passive cable"));
+        assert!(s.bullets.iter().any(|b| b == "Cable vendor: Apple"));
     }
 }

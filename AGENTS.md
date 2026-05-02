@@ -1,14 +1,14 @@
-# WhatCable-Linux — Agent Guidelines
+# WhatCable — Agent Guidelines
 
 ## Project Overview
 
-WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable) (macOS) by Darryl Morley. It is a CLI tool that shows USB device and USB-C cable information by reading Linux sysfs.
+WhatCable is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable) (macOS) by Darryl Morley. It is a CLI tool that shows USB device and USB-C cable information by reading Linux sysfs.
 
 This repository is a Rust rewrite of the original C++/CMake implementation.
 
 ## Architecture
 
-A single Cargo crate exposing both a library (`whatcable_linux`) and a binary (`whatcable-linux`):
+A single Cargo crate exposing both a library (`whatcable`) and a binary (`whatcable`):
 
 - **`src/lib.rs`** — re-exports the public API.
 - **`src/main.rs`** — CLI entry. Argument parsing via `clap`.
@@ -63,9 +63,9 @@ cargo test                          # full, requires libudev-dev
 
 Manual smoke tests:
 
-- `./target/debug/whatcable-linux`
-- `./target/debug/whatcable-linux --json`
-- `./target/debug/whatcable-linux --watch`     (requires `watch` feature)
+- `./target/debug/whatcable`
+- `./target/debug/whatcable --json`
+- `./target/debug/whatcable --watch`     (requires `watch` feature)
 
 ## Key Files to Know
 
