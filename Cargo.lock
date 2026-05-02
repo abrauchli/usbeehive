@@ -301,6 +301,7 @@ dependencies = [
 name = "whatcable-watch"
 version = "0.3.0"
 dependencies = [
+ "libc",
  "udev",
 ]
 
