@@ -30,28 +30,32 @@ This repository is forked from [Zetaphor/whatcable-linux](https://github.com/Zet
 
 ### Build from source
 
-Requires C++20, CMake, pkg-config, libudev headers, and a filesystem library (`std::filesystem`, provided by your toolchain).
+Requires Rust 1.74+ (install via [rustup](https://rustup.rs)). The default
+build also needs `libudev` development headers for hotplug (`--watch`) support.
 
 ```bash
 # Ubuntu / Debian
-sudo apt install build-essential cmake pkg-config libudev-dev
+sudo apt install libudev-dev pkg-config
 
 # Fedora
-sudo dnf install gcc-c++ cmake pkgconf-pkg-config systemd-devel
+sudo dnf install systemd-devel pkgconf-pkg-config
 
 # Arch / Manjaro
-sudo pacman -S --needed base-devel cmake pkgconf systemd-libs
+sudo pacman -S --needed systemd-libs pkgconf
 ```
 
-Build and optionally install:
+Build:
 
 ```bash
-cmake -B build -DCMAKE_INSTALL_PREFIX=/usr
-cmake --build build
-sudo cmake --install build   # optional
+cargo build --release
+sudo install -Dm755 target/release/whatcable-linux /usr/local/bin/whatcable-linux
 ```
 
-The `whatcable-linux` binary is `build/src/cli/whatcable-linux` if you skip install.
+If libudev is unavailable, build without the watch feature:
+
+```bash
+cargo build --release --no-default-features
+```
 
 ### Usage
 
