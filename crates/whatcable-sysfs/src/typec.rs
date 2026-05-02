@@ -72,10 +72,7 @@ fn read_ucsi_power_supply(
     let resolved = std::fs::canonicalize(port_path).ok()?;
     let s = resolved.to_string_lossy();
     let controller = ucsi_controller(&s)?;
-    let psy_path = psy_root.join(format!(
-        "ucsi-source-psy-{controller}{}",
-        port_number + 1
-    ));
+    let psy_path = psy_root.join(format!("ucsi-source-psy-{controller}{}", port_number + 1));
     if !sysfs::path_exists(&psy_path) {
         return None;
     }

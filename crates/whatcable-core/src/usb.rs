@@ -150,20 +150,30 @@ mod tests {
 
     #[test]
     fn power_label_formats() {
-        let mut d = UsbDevice::default();
-        d.max_power_ma = 0;
+        let d = UsbDevice {
+            max_power_ma: 0,
+            ..Default::default()
+        };
         assert!(d.power_label().is_none());
-        d.max_power_ma = 100;
+        let d = UsbDevice {
+            max_power_ma: 100,
+            ..Default::default()
+        };
         assert_eq!(d.power_label().as_deref(), Some("100 mA"));
-        d.max_power_ma = 1500;
+        let d = UsbDevice {
+            max_power_ma: 1500,
+            ..Default::default()
+        };
         assert_eq!(d.power_label().as_deref(), Some("1.5 W"));
     }
 
     #[test]
     fn display_name_falls_back_to_vidpid() {
-        let mut d = UsbDevice::default();
-        d.vendor_id = 0x05AC;
-        d.product_id = 0x12A8;
+        let mut d = UsbDevice {
+            vendor_id: 0x05AC,
+            product_id: 0x12A8,
+            ..Default::default()
+        };
         assert_eq!(d.display_name(), "05ac:12a8");
         d.product = "iPhone".into();
         assert_eq!(d.display_name(), "iPhone");

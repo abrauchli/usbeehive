@@ -2,7 +2,7 @@
 //!
 //! This crate enumerates USB / Type-C / USB Power Delivery state from the
 //! kernel-published `/sys` virtual filesystem, returning the structured
-//! types defined in [`whatcable-core`](https://docs.rs/whatcable-core).
+//! types defined in [`whatcable_core`].
 //!
 //! # Injectable root
 //!
@@ -31,7 +31,7 @@
 //!
 //! # Re-exports
 //!
-//! For convenience, the entire public surface of [`whatcable-core`] is
+//! For convenience, the entire public surface of [`whatcable_core`] is
 //! re-exported under [`core`].
 
 #![forbid(unsafe_code)]

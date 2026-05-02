@@ -219,7 +219,11 @@ fn deep_topology_preserves_parent_chain() {
     mgr.refresh();
 
     let snap = mgr.snapshot();
-    let root_hub = snap.usb_devices.iter().find(|d| d.bus_port == "usb5").unwrap();
+    let root_hub = snap
+        .usb_devices
+        .iter()
+        .find(|d| d.bus_port == "usb5")
+        .unwrap();
     let outer_hub = root_hub
         .children
         .iter()

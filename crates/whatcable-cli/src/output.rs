@@ -94,7 +94,11 @@ fn print_text_iter<W: Write>(
 
 /// Render the manager's snapshot as pretty-printed JSON.
 pub fn print_json<W: Write>(w: &mut W, mgr: &DeviceManager, show_raw: bool) -> io::Result<()> {
-    let arr: Vec<Value> = mgr.devices().iter().map(|d| device_json(d, show_raw)).collect();
+    let arr: Vec<Value> = mgr
+        .devices()
+        .iter()
+        .map(|d| device_json(d, show_raw))
+        .collect();
     let s = serde_json::to_string_pretty(&arr).unwrap();
     writeln!(w, "{s}")
 }
@@ -192,7 +196,9 @@ pub(crate) fn device_json(dev: &DeviceSummary, show_raw: bool) -> Value {
             }
             ps.insert("chargeType".into(), Value::String(psy.charge_type.clone()));
             ps.insert("usbType".into(), Value::String(psy.usb_type.clone()));
-            t.as_object_mut().unwrap().insert("powerSupply".into(), Value::Object(ps));
+            t.as_object_mut()
+                .unwrap()
+                .insert("powerSupply".into(), Value::Object(ps));
         }
         if show_raw {
             t.as_object_mut()
@@ -215,9 +221,10 @@ pub(crate) fn device_json(dev: &DeviceSummary, show_raw: bool) -> Value {
                 .insert("speed".into(), Value::String(cable_speed_label(s).into()));
         }
         if let Some(curr) = c.current_rating {
-            cab.as_object_mut()
-                .unwrap()
-                .insert("current".into(), Value::String(cable_current_label(curr).into()));
+            cab.as_object_mut().unwrap().insert(
+                "current".into(),
+                Value::String(cable_current_label(curr).into()),
+            );
         }
         obj.insert("cable".into(), cab);
     }

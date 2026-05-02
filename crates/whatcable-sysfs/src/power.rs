@@ -35,7 +35,11 @@ fn parse_pdos(caps_path: &Path) -> Vec<PowerDataObject> {
     entries
         .into_iter()
         .map(|p| {
-            let name = p.file_name().unwrap_or_default().to_string_lossy().into_owned();
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
             let idx = name
                 .rsplit_once(':')
                 .map(|(_, t)| t)

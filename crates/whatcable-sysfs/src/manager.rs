@@ -149,12 +149,16 @@ mod tests {
 
     #[test]
     fn root_hubs_are_excluded() {
-        let mut root = UsbDevice::default();
-        root.is_root_hub = true;
-        root.bus_port = "usb1".into();
-        let mut child = UsbDevice::default();
-        child.bus_port = "1-1".into();
-        child.product = "thing".into();
+        let root = UsbDevice {
+            is_root_hub: true,
+            bus_port: "usb1".into(),
+            ..Default::default()
+        };
+        let child = UsbDevice {
+            bus_port: "1-1".into(),
+            product: "thing".into(),
+            ..Default::default()
+        };
         let summaries = build_summaries(&[root, child], &[], &[]);
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].headline, "thing");

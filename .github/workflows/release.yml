@@ -23,10 +23,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build
-        run: cargo build --release --locked
+        run: cargo build --release --locked --workspace
 
       - name: Test
-        run: cargo test --release --locked
+        run: cargo test --release --locked --workspace
 
       - name: Package CLI binary
         run: |
@@ -75,7 +75,7 @@ jobs:
             Or via Cargo:
 
             ```bash
-            cargo install whatcable
+            cargo install whatcable-cli
             ```
           files: |
             assets/**/*.tar.gz

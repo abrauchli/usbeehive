@@ -253,11 +253,7 @@ fn json_roundtrip_for_typec_port() {
     // Make sure the captured types serialize cleanly under serde_json.
     // (We dev-depend on serde_json via the test harness.)
     let root = TempRoot::new("tc-json");
-    write_typec_port(
-        root.path(),
-        "port0",
-        &[("data_role", "host [device]")],
-    );
+    write_typec_port(root.path(), "port0", &[("data_role", "host [device]")]);
     write_typec_partner(
         root.path(),
         "port0",

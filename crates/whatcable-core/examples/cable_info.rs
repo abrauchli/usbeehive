@@ -19,7 +19,11 @@ fn main() {
     let args: Vec<u32> = std::env::args()
         .skip(1)
         .map(|s| {
-            let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(&s).to_string();
+            let s = s
+                .strip_prefix("0x")
+                .or_else(|| s.strip_prefix("0X"))
+                .unwrap_or(&s)
+                .to_string();
             u32::from_str_radix(&s, 16).expect("hex u32")
         })
         .collect();
@@ -40,7 +44,10 @@ fn main() {
     };
     let info = CableInfo::from_typec_cable(&cable);
 
-    println!("Vendor       : {} (0x{:04x})", info.vendor_name, info.vendor_id);
+    println!(
+        "Vendor       : {} (0x{:04x})",
+        info.vendor_name, info.vendor_id
+    );
     println!("Type         : {}", info.cable_type);
     println!("Active       : {}", info.is_active);
     println!("Speed        : {:?}", info.speed);

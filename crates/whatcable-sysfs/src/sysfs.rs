@@ -237,7 +237,10 @@ mod tests {
         assert_eq!(s.usb_devices_dir(), Path::new("/some/root/bus/usb/devices"));
         assert_eq!(s.typec_dir(), Path::new("/some/root/class/typec"));
         assert_eq!(s.pd_dir(), Path::new("/some/root/class/usb_power_delivery"));
-        assert_eq!(s.power_supply_dir(), Path::new("/some/root/class/power_supply"));
+        assert_eq!(
+            s.power_supply_dir(),
+            Path::new("/some/root/class/power_supply")
+        );
     }
 }
 

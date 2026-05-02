@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 /// Discriminator for [`PowerDataObject`] entries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum PdoType {
     /// Fixed-voltage source (the standard 5V / 9V / 15V / 20V profiles).
     FixedSupply,
@@ -20,6 +20,7 @@ pub enum PdoType {
     /// Programmable Power Supply (USB-PD 3.0 PPS / EPR APDO).
     Pps,
     /// Reserved or unrecognised.
+    #[default]
     Unknown,
 }
 
@@ -33,12 +34,6 @@ impl PdoType {
             PdoType::Pps => "PPS",
             PdoType::Unknown => "Unknown",
         }
-    }
-}
-
-impl Default for PdoType {
-    fn default() -> Self {
-        PdoType::Unknown
     }
 }
 

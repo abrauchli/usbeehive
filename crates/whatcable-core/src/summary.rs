@@ -161,7 +161,11 @@ impl DeviceSummary {
         ));
 
         DeviceSummary {
-            category: if dev.is_hub { Category::Hub } else { Category::UsbDevice },
+            category: if dev.is_hub {
+                Category::Hub
+            } else {
+                Category::UsbDevice
+            },
             status: Status::Connected,
             headline: dev.display_name(),
             subtitle,
@@ -207,7 +211,8 @@ impl DeviceSummary {
                 Some(&vdo) => {
                     let hdr = decode_id_header(vdo);
                     let product_label = product_type_label(
-                        hdr.ufp_product_type.unwrap_or(crate::pd::ProductType::Undefined),
+                        hdr.ufp_product_type
+                            .unwrap_or(crate::pd::ProductType::Undefined),
                     );
                     let vendor_label = vendor::lookup(hdr.vendor_id);
                     if vendor::is_hex_fallback(&vendor_label) {
@@ -237,7 +242,8 @@ impl DeviceSummary {
         }
 
         if !port.power_op_mode.is_empty() {
-            s.bullets.push(format!("Power mode: {}", port.power_op_mode));
+            s.bullets
+                .push(format!("Power mode: {}", port.power_op_mode));
         }
 
         if let Some(psy) = &port.power_supply {
@@ -252,17 +258,22 @@ impl DeviceSummary {
             s.bullets.push(format!("PD revision: {}", port.pd_revision));
         }
         if !port.orientation.is_empty() && port.orientation != "unknown" {
-            s.bullets.push(format!("Plug orientation: {}", port.orientation));
+            s.bullets
+                .push(format!("Plug orientation: {}", port.orientation));
         }
 
         if let Some(c) = &s.cable {
             if let Some(speed) = c.speed {
-                s.bullets
-                    .push(format!("Cable speed: {}", crate::pd::cable_speed_label(speed)));
+                s.bullets.push(format!(
+                    "Cable speed: {}",
+                    crate::pd::cable_speed_label(speed)
+                ));
             }
             if let Some(curr) = c.current_rating {
-                s.bullets
-                    .push(format!("Cable current: {}", crate::pd::cable_current_label(curr)));
+                s.bullets.push(format!(
+                    "Cable current: {}",
+                    crate::pd::cable_current_label(curr)
+                ));
             }
             if c.max_watts > 0 {
                 s.bullets.push(format!("Cable max power: {}W", c.max_watts));

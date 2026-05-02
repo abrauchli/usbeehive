@@ -91,7 +91,11 @@ fn keyboard_renders_in_text_mode() {
         .arg(root.path())
         .output()
         .expect("binary runs");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("USB Keyboard"));
     assert!(stdout.contains("Logitech"));

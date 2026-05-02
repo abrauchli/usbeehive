@@ -86,7 +86,11 @@ impl<'a> UsbDeviceFixture<'a> {
         write_attr(&usb_dir, "speed", &self.speed_mbps.to_string());
         write_attr(&usb_dir, "bMaxPower", &format!("{}mA", self.max_power_ma));
         write_attr(&usb_dir, "version", self.version);
-        write_attr(&usb_dir, "bDeviceClass", &format!("{:02x}", self.device_class));
+        write_attr(
+            &usb_dir,
+            "bDeviceClass",
+            &format!("{:02x}", self.device_class),
+        );
         write_attr(&usb_dir, "busnum", &self.bus_num.to_string());
         write_attr(&usb_dir, "devnum", &self.dev_num.to_string());
         write_attr(&usb_dir, "removable", self.removable);
@@ -99,8 +103,16 @@ impl<'a> UsbDeviceFixture<'a> {
             let if_dir = usb_dir.join(format!("{}:1.{}", self.bus_port, iface.number));
             fs::create_dir_all(&if_dir).unwrap();
             write_attr(&if_dir, "bInterfaceClass", &format!("{:02x}", iface.class));
-            write_attr(&if_dir, "bInterfaceSubClass", &format!("{:02x}", iface.sub_class));
-            write_attr(&if_dir, "bInterfaceProtocol", &format!("{:02x}", iface.protocol));
+            write_attr(
+                &if_dir,
+                "bInterfaceSubClass",
+                &format!("{:02x}", iface.sub_class),
+            );
+            write_attr(
+                &if_dir,
+                "bInterfaceProtocol",
+                &format!("{:02x}", iface.protocol),
+            );
             if !iface.driver.is_empty() {
                 let driver_target = root.join(format!("bus/usb/drivers/{}", iface.driver));
                 fs::create_dir_all(&driver_target).unwrap();
@@ -140,13 +152,10 @@ pub fn write_typec_cable(
 }
 
 /// Helper: write a Type-C partner directory with optional VDOs.
-pub fn write_typec_partner(
-    root: &Path,
-    port_name: &str,
-    partner_type: &str,
-    vdos: &[(&str, u32)],
-) {
-    let dir = root.join("class/typec").join(format!("{port_name}-partner"));
+pub fn write_typec_partner(root: &Path, port_name: &str, partner_type: &str, vdos: &[(&str, u32)]) {
+    let dir = root
+        .join("class/typec")
+        .join(format!("{port_name}-partner"));
     fs::create_dir_all(&dir).unwrap();
     write_attr(&dir, "type", partner_type);
     if !vdos.is_empty() {
@@ -168,12 +177,7 @@ pub struct PdoFixture {
     pub max_voltage_mv: u32,
 }
 
-pub fn write_pd_port(
-    root: &Path,
-    port_name: &str,
-    parent_port: i32,
-    source_pdos: &[PdoFixture],
-) {
+pub fn write_pd_port(root: &Path, port_name: &str, parent_port: i32, source_pdos: &[PdoFixture]) {
     let dir = root.join("class/usb_power_delivery").join(port_name);
     let caps = dir.join("source-capabilities");
     fs::create_dir_all(&caps).unwrap();

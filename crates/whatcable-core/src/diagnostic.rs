@@ -77,9 +77,7 @@ impl ChargingDiagnostic {
             Some(ChargingDiagnostic {
                 bottleneck: Bottleneck::DeviceLimit,
                 summary: format!("Charging at {active_w}W"),
-                detail: format!(
-                    "Charging at {active_w}W (charger can do up to {charger_max_w}W)"
-                ),
+                detail: format!("Charging at {active_w}W (charger can do up to {charger_max_w}W)"),
                 is_warning: false,
             })
         } else {

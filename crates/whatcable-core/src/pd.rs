@@ -29,9 +29,10 @@
 use serde::Serialize;
 
 /// The kind of USB-PD product reported in a `Discover Identity` ID Header.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ProductType {
     /// Field absent or reserved.
+    #[default]
     Undefined,
     /// USB hub.
     Hub,
@@ -90,12 +91,6 @@ pub struct IdHeaderVdo {
     pub dfp_product_type: Option<ProductType>,
     /// Cable / device vendor ID (low 16 bits of the VDO).
     pub vendor_id: u16,
-}
-
-impl Default for ProductType {
-    fn default() -> Self {
-        ProductType::Undefined
-    }
 }
 
 /// Decoded fields of a Cable VDO.
@@ -317,7 +312,10 @@ mod tests {
     #[test]
     fn label_helpers() {
         assert_eq!(product_type_label(ProductType::Hub), "USB Hub");
-        assert_eq!(cable_speed_label(CableSpeed::Usb4Gen4), "USB4 Gen 4 (40/80 Gbps)");
+        assert_eq!(
+            cable_speed_label(CableSpeed::Usb4Gen4),
+            "USB4 Gen 4 (40/80 Gbps)"
+        );
         assert_eq!(cable_speed_max_gbps(CableSpeed::Usb32Gen1), 5);
         assert_eq!(cable_speed_max_gbps(CableSpeed::Usb20), 0);
         assert_eq!(cable_current_label(CableCurrent::FiveAmp), "5A");

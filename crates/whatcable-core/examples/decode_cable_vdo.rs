@@ -24,10 +24,18 @@ fn main() -> ExitCode {
     println!("ID Header VDO: 0x{id_hex:08x}");
     println!("  vendor_id    = 0x{:04x}", id_hdr.vendor_id);
     if let Some(p) = id_hdr.ufp_product_type {
-        println!("  ufp_product  = {} ({})", product_type_label(p), p_label(p));
+        println!(
+            "  ufp_product  = {} ({})",
+            product_type_label(p),
+            p_label(p)
+        );
     }
     if let Some(p) = id_hdr.dfp_product_type {
-        println!("  dfp_product  = {} ({})", product_type_label(p), p_label(p));
+        println!(
+            "  dfp_product  = {} ({})",
+            product_type_label(p),
+            p_label(p)
+        );
     }
     println!("  comm host    = {}", id_hdr.usb_comm_capable_as_host);
     println!("  comm device  = {}", id_hdr.usb_comm_capable_as_device);
@@ -39,7 +47,10 @@ fn main() -> ExitCode {
         println!();
         println!("Cable VDO: 0x{cable_hex:08x}");
         println!("  speed        = {}", cable_speed_label(cable.speed));
-        println!("  current      = {}", cable_current_label(cable.current_rating));
+        println!(
+            "  current      = {}",
+            cable_current_label(cable.current_rating)
+        );
         println!("  max VBUS     = {}V", cable.max_vbus_volts);
         println!("  max watts    = {}W", cable.max_watts);
         println!("  vbus thru    = {}", cable.vbus_through_cable);
@@ -49,7 +60,10 @@ fn main() -> ExitCode {
 }
 
 fn parse_hex(s: &str) -> u32 {
-    let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+    let s = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .unwrap_or(s);
     u32::from_str_radix(s, 16).unwrap_or_else(|_| {
         eprintln!("not a hex u32: {s}");
         std::process::exit(2);

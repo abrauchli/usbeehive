@@ -4,7 +4,7 @@
 //! `usb` and `typec` subsystems and notifies the caller when devices come
 //! and go. The intended usage is:
 //!
-//! 1. Take an initial snapshot via [`whatcable-sysfs::DeviceManager::refresh`].
+//! 1. Take an initial snapshot (e.g. via `whatcable_sysfs::DeviceManager::refresh`).
 //! 2. Open a [`Watcher`] and treat it as a "did anything change?" signal.
 //! 3. Whenever the watcher fires, re-snapshot with `refresh()` and re-render.
 //!
@@ -177,10 +177,7 @@ where
     let mut dirty: Option<Instant> = None;
 
     while GLOBAL_RUNNING.load(Ordering::SeqCst) {
-        let timeout = match dirty {
-            Some(deadline) => Some(deadline.saturating_duration_since(Instant::now())),
-            None => None,
-        };
+        let timeout = dirty.map(|deadline| deadline.saturating_duration_since(Instant::now()));
         match watcher.wait(timeout) {
             WaitResult::Readable => {
                 watcher.drain();
