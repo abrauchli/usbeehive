@@ -6,9 +6,9 @@ use std::os::fd::RawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use whatcable_linux::manager::DeviceManager;
-use whatcable_linux::monitor::UdevMonitor;
-use whatcable_linux::output::{print_json, print_text};
+use whatcable::manager::DeviceManager;
+use whatcable::monitor::UdevMonitor;
+use whatcable::output::{print_json, print_text};
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
 

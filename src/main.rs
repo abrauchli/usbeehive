@@ -4,8 +4,8 @@ use std::io;
 
 use clap::Parser;
 
-use whatcable_linux::manager::DeviceManager;
-use whatcable_linux::output::{print_json, print_text};
+use whatcable::manager::DeviceManager;
+use whatcable::output::{print_json, print_text};
 
 #[cfg(feature = "watch")]
 mod watch;
