@@ -190,8 +190,7 @@ pub(crate) fn device_json(dev: &DeviceSummary, show_raw: bool) -> Value {
                     ps.insert(k.into(), Value::Number(val.into()));
                 }
             }
-            if let (Some(v_uv), Some(i_ua)) = (psy.voltage_now_uv, psy.current_now_ua) {
-                let mw = (v_uv as i128 * i_ua as i128 / 1_000_000_000) as i64;
+            if let Some(mw) = psy.negotiated_power_mw() {
                 ps.insert("negotiatedPowerMW".into(), Value::Number(mw.into()));
             }
             ps.insert("chargeType".into(), Value::String(psy.charge_type.clone()));

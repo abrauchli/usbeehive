@@ -66,14 +66,12 @@ pub struct DeviceSummary {
 }
 
 fn power_contract_label(psy: &TypeCPowerSupply) -> Option<String> {
+    let mw = psy.negotiated_power_mw()?;
     let v_uv = psy.voltage_now_uv?;
     let i_ua = psy.current_now_ua?;
-    if v_uv <= 0 || i_ua <= 0 {
-        return None;
-    }
     let volts = v_uv as f64 / 1_000_000.0;
     let amps = i_ua as f64 / 1_000_000.0;
-    let watts = ((v_uv as i128 * i_ua as i128 + 500_000_000_000) / 1_000_000_000_000) as i64;
+    let watts = (mw + 500) / 1000;
     Some(format!(
         "Negotiated power: {volts:.1}V @ {amps:.2}A — {watts}W"
     ))

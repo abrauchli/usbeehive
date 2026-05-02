@@ -77,6 +77,24 @@ pub struct TypeCPowerSupply {
     pub raw_attributes: BTreeMap<String, String>,
 }
 
+impl TypeCPowerSupply {
+    /// Live negotiated wattage in **mW**, computed as
+    /// `voltage_now × current_now`. Uses `i128` internally so EPR
+    /// voltages (up to 48V) don't overflow when multiplied by current.
+    ///
+    /// Returns `None` when either reading is missing or non-positive —
+    /// callers should treat that as "no live wattage available right now",
+    /// not as an error.
+    pub fn negotiated_power_mw(&self) -> Option<i64> {
+        let v = self.voltage_now_uv?;
+        let i = self.current_now_ua?;
+        if v <= 0 || i <= 0 {
+            return None;
+        }
+        Some(((v as i128 * i as i128) / 1_000_000_000) as i64)
+    }
+}
+
 /// Snapshot of one entry under `/sys/class/typec/`.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 pub struct TypeCPort {
@@ -163,6 +181,57 @@ mod tests {
         p.cable = None;
         p.partner = Some(TypeCPartner::default());
         assert!(p.is_connected());
+    }
+
+    #[test]
+    fn negotiated_power_mw_basic() {
+        let psy = TypeCPowerSupply {
+            voltage_now_uv: Some(5_000_000),
+            current_now_ua: Some(3_000_000),
+            ..Default::default()
+        };
+        assert_eq!(psy.negotiated_power_mw(), Some(15_000));
+    }
+
+    #[test]
+    fn negotiated_power_mw_epr_no_overflow() {
+        // 48V (EPR) × 5A = 240W = 240_000 mW. Naive i32 multiply overflows
+        // 48_000_000 µV × 5_000_000 µA — make sure i128 path is reached.
+        let psy = TypeCPowerSupply {
+            voltage_now_uv: Some(48_000_000),
+            current_now_ua: Some(5_000_000),
+            ..Default::default()
+        };
+        assert_eq!(psy.negotiated_power_mw(), Some(240_000));
+    }
+
+    #[test]
+    fn negotiated_power_mw_returns_none_on_missing() {
+        let psy = TypeCPowerSupply::default();
+        assert!(psy.negotiated_power_mw().is_none());
+
+        let only_voltage = TypeCPowerSupply {
+            voltage_now_uv: Some(5_000_000),
+            ..Default::default()
+        };
+        assert!(only_voltage.negotiated_power_mw().is_none());
+    }
+
+    #[test]
+    fn negotiated_power_mw_rejects_zero_or_negative() {
+        let zero = TypeCPowerSupply {
+            voltage_now_uv: Some(0),
+            current_now_ua: Some(3_000_000),
+            ..Default::default()
+        };
+        assert!(zero.negotiated_power_mw().is_none());
+
+        let neg = TypeCPowerSupply {
+            voltage_now_uv: Some(5_000_000),
+            current_now_ua: Some(-1),
+            ..Default::default()
+        };
+        assert!(neg.negotiated_power_mw().is_none());
     }
 
     #[test]
