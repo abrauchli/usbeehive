@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-02
+
+Metadata-only patch release.
+
+### Changed
+
+- `repository` and `homepage` in `Cargo.toml` now point to
+  `github.com/abrauchli/whatcable` (the active fork) instead of the
+  upstream Zetaphor repo.
+- MSRV correctly declared as `1.85` (was `1.74` in 0.3.0; the actual
+  build hasn't worked on 1.74 since `clap_lex 1.1` adopted edition
+  2024). Users running stable Rust are unaffected.
+
 ## [0.3.0] - 2026-05-02
 
 Major rewrite: the crate gains a real library API behind feature flags,
@@ -100,5 +113,6 @@ For library consumers:
 - Cast signal handler through `*const ()` for clippy fn-to-int lint.
 - Re-enable `watch` feature by default.
 
-[0.3.0]: https://github.com/Zetaphor/whatcable-linux/compare/v0.2.1...v0.3.0
+[0.3.1]: https://github.com/abrauchli/whatcable/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/abrauchli/whatcable/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Zetaphor/whatcable-linux/releases/tag/v0.2.1

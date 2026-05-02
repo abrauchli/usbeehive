@@ -1,12 +1,12 @@
 [package]
 name = "whatcable"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 license = "MIT"
 authors = ["Andreas Brauchli"]
 description = "Tells you what each USB cable / device on Linux can actually do. Rust port of WhatCable."
-repository = "https://github.com/Zetaphor/whatcable-linux"
-homepage = "https://github.com/Zetaphor/whatcable-linux"
+repository = "https://github.com/abrauchli/whatcable"
+homepage = "https://github.com/abrauchli/whatcable"
 readme = "README.md"
 rust-version = "1.85"
 keywords = ["usb", "usb-c", "power-delivery", "sysfs", "cli"]
