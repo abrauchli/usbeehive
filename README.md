@@ -1,10 +1,10 @@
-# WhatCable-Linux
+# WhatCable
 
 > **What can this USB cable actually do?**
 
 A command-line tool that tells you, in plain English, what each USB device plugged into your Linux machine can actually do.
 
-**WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** This port expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
+**WhatCable is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** This port expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
 
 This repository is a Rust rewrite forked from [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux) (originally C++/CMake).
 
@@ -72,7 +72,7 @@ whatcable-linux --help
 
 ## How it works
 
-WhatCable-Linux reads three areas of the Linux sysfs virtual filesystem. No root access required for basic info:
+WhatCable reads three areas of the Linux sysfs virtual filesystem. No root access required for basic info:
 
 | sysfs path | What it gives us |
 |---|---|
@@ -95,7 +95,7 @@ Cable speed and power decoding follow the USB Power Delivery 3.x spec, ported fr
 
 Upstream Linux/KDE codebase: [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux).
 
-WhatCable-Linux is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app.
+WhatCable is a port of [WhatCable](https://github.com/darrylmorley/whatcable) by [Darryl Morley](https://github.com/darrylmorley). The USB Power Delivery decoding logic, charging diagnostics, vendor database, and plain-English summary approach are derived from the original macOS app.
 
 ## License
 
