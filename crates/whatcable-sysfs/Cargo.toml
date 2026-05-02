@@ -16,5 +16,8 @@ categories.workspace = true
 whatcable-core = { workspace = true }
 serde = { workspace = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [lints.rust]
 missing_docs = "warn"
