@@ -24,9 +24,9 @@ udev = { version = "0.9", optional = true }
 libc = "0.2"
 
 [features]
-default = ["watch"]
+default = []
 # `watch` enables the libudev hotplug monitor and `--watch` mode. Requires
-# libudev development headers at build time.
+# libudev development headers (libudev-dev / systemd-devel) at build time.
 watch = ["dep:udev"]
 
 [profile.release]

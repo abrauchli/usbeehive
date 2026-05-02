@@ -15,9 +15,9 @@ A single Cargo crate exposing both a library (`whatcable_linux`) and a binary (`
 - **`src/watch.rs`** — `--watch` mode loop (`poll(2)` + 500 ms debounce).
   Compiled only when the `watch` Cargo feature is enabled.
 
-Hotplug uses **`libudev`** through the `udev` crate. The `watch` feature is on
-by default but can be disabled (`--no-default-features`) so the crate builds
-on systems without libudev development headers.
+Hotplug uses **`libudev`** through the `udev` crate, gated behind the
+optional `watch` Cargo feature (off by default) so plain `cargo build` /
+`cargo test` works on systems without libudev development headers.
 
 ## Key Data Flow
 
@@ -50,14 +50,14 @@ on systems without libudev development headers.
 ## Build
 
 ```bash
-cargo build --release                           # default (with --watch support)
-cargo build --release --no-default-features     # without libudev / --watch
+cargo build --release                       # default, no --watch
+cargo build --release --features watch      # with libudev / --watch
 ```
 
 ## Testing
 
 ```bash
-cargo test --no-default-features
+cargo test
 ```
 
 Manual smoke tests:

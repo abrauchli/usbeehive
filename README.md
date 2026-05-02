@@ -30,8 +30,9 @@ This repository is a Rust rewrite forked from [Zetaphor/whatcable-linux](https:/
 
 ### Build from source
 
-Requires Rust 1.74+ (install via [rustup](https://rustup.rs)). The default
-build also needs `libudev` development headers for hotplug (`--watch`) support.
+Requires Rust 1.74+ (install via [rustup](https://rustup.rs)). For `--watch`
+hotplug support, also install `libudev` development headers and build with
+`--features watch`.
 
 ```bash
 # Ubuntu / Debian
@@ -47,20 +48,15 @@ sudo pacman -S --needed systemd-libs pkgconf
 Build:
 
 ```bash
-cargo build --release
+cargo build --release                      # core build, no --watch
+cargo build --release --features watch     # with libudev hotplug support
 sudo install -Dm755 target/release/whatcable-linux /usr/local/bin/whatcable-linux
-```
-
-If libudev is unavailable, build without the watch feature:
-
-```bash
-cargo build --release --no-default-features
 ```
 
 ### Tests
 
 ```bash
-cargo test --no-default-features
+cargo test
 ```
 
 ### Usage
