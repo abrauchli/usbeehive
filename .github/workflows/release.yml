@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |
@@ -36,7 +36,7 @@ jobs:
           tar czf ../whatcable-${GITHUB_REF_NAME}-x86_64-linux.tar.gz whatcable-linux
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: release-assets
           path: |
@@ -47,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: release-assets
           path: assets
