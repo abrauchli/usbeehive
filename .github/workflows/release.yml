@@ -75,7 +75,7 @@ jobs:
             Or via Cargo:
 
             ```bash
-            cargo install whatcable-cli
+            cargo install whatcable
             ```
           files: |
             assets/**/*.tar.gz

@@ -21,9 +21,9 @@ The Rust rewrite is forked from
 | [`whatcable-core`](crates/whatcable-core) | Pure data types + USB-PD VDO decoders + diagnostics. No IO. |
 | [`whatcable-sysfs`](crates/whatcable-sysfs) | Linux `/sys` backend with an injectable root. Returns `whatcable-core` types. |
 | [`whatcable-watch`](crates/whatcable-watch) | libudev hotplug monitor; debounced render-loop helper. |
-| [`whatcable-cli`](crates/whatcable-cli) | The `whatcable` binary, with `--json` / `--watch` / `--raw` / `--sysfs-root`. |
+| [`whatcable`](crates/whatcable-cli) | The `whatcable` binary, with `--json` / `--watch` / `--raw` / `--sysfs-root`. |
 
-If you want **a CLI**, install `whatcable-cli`. If you want a **library**,
+If you want **the CLI**, install `whatcable`. If you want a **library**,
 pick the smallest crate that covers your need:
 
 - decoding USB-PD VDOs in isolation? Just `whatcable-core`.
@@ -54,10 +54,8 @@ pick the smallest crate that covers your need:
 ### From crates.io
 
 ```bash
-cargo install whatcable-cli
+cargo install whatcable
 ```
-
-The installed binary is `whatcable`.
 
 ### Build from source
 
@@ -77,7 +75,7 @@ sudo pacman -S --needed systemd-libs pkgconf
 
 ```bash
 cargo build --release                                                   # default (with --watch)
-cargo build --release -p whatcable-cli --no-default-features            # no libudev
+cargo build --release -p whatcable --no-default-features                # no libudev
 sudo install -Dm755 target/release/whatcable /usr/local/bin/whatcable
 ```
 
