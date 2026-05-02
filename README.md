@@ -6,7 +6,7 @@ A command-line tool that tells you, in plain English, what each USB device plugg
 
 **WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable), a macOS menu bar app by [Darryl Morley](https://github.com/darrylmorley).** This port expands the original USB-C focus to cover all USB devices, while preserving the rich USB-C Power Delivery diagnostics from the original.
 
-This repository is forked from [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux).
+This repository is a Rust rewrite forked from [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux) (originally C++/CMake).
 
 ## What it shows
 
@@ -55,6 +55,12 @@ If libudev is unavailable, build without the watch feature:
 
 ```bash
 cargo build --release --no-default-features
+```
+
+### Tests
+
+```bash
+cargo test --no-default-features
 ```
 
 ### Usage

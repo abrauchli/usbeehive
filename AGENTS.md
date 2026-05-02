@@ -4,67 +4,98 @@
 
 WhatCable-Linux is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable) (macOS) by Darryl Morley. It is a CLI tool that shows USB device and USB-C cable information by reading Linux sysfs.
 
+This repository is a Rust rewrite of the original C++/CMake implementation.
+
 ## Architecture
 
-Two components share a single core library:
+A single Cargo crate exposing both a library (`whatcable_linux`) and a binary (`whatcable-linux`):
 
-- **`src/core/`** — `libwhatcablecore`, a static C++ library (C++20, STL only). Reads sysfs over `std::filesystem` / streams, decodes USB PD data, and produces human-readable summaries. Links **`libudev`** for hotplug FD monitoring only — no Qt or other GUI/toolkit dependency.
-- **`src/cli/`** — `whatcable-linux` CLI binary. POSIX `getopt_long`, manual JSON serialization for `--json`, `poll()` + 500 ms debounce for `--watch`.
+- **`src/lib.rs`** — re-exports the public API.
+- **`src/main.rs`** — CLI entry. Argument parsing via `clap`.
+- **`src/watch.rs`** — `--watch` mode loop (`poll(2)` + 500 ms debounce).
+  Compiled only when the `watch` Cargo feature is enabled.
+
+Hotplug uses **`libudev`** through the `udev` crate. The `watch` feature is on
+by default but can be disabled (`--no-default-features`) so the crate builds
+on systems without libudev development headers.
 
 ## Key Data Flow
 
 ```
-/sys/bus/usb/devices/         → UsbDevice.cpp
-/sys/class/typec/             → TypeCPort.cpp
-/sys/class/usb_power_delivery/ → PowerDelivery.cpp
+/sys/bus/usb/devices/         → src/usb.rs
+/sys/class/typec/             → src/typec.rs
+/sys/class/usb_power_delivery/ → src/power.rs
                                     ↓
-                              DeviceManager.cpp  ← UDevMonitor.cpp (hotplug)
+                              src/manager.rs  ← src/monitor.rs (hotplug)
                                     ↓
-                              DeviceSummary.cpp (plain-English output)
+                              src/summary.rs (plain-English output)
                                     ↓
-                              CLI (main.cpp)
+                              src/output.rs → CLI (src/main.rs)
 ```
 
 ## Code Conventions
 
-- C++20, standard library. Use ordinary string literals or `std::string` / `std::string_view` as appropriate.
-- All core classes are in the `WhatCable` namespace.
-- sysfs reads go through `SysfsReader` — never read `/sys/` directly with raw file I/O from call sites (implementation may use filesystem APIs inside `SysfsReader`).
-- Source files derived from the original Swift code must keep the attribution header: `// Derived from WhatCable by Darryl Morley (https://github.com/darrylmorley/whatcable)`
-- Handle missing sysfs paths gracefully — return empty/nullopt, never crash. Many systems lack `/sys/class/typec/` or `/sys/class/usb_power_delivery/`.
+- Rust 2021, MSRV 1.74.
+- All sysfs reads go through `crate::sysfs` — never read `/sys/` directly with
+  raw `std::fs` from call sites.
+- Handle missing sysfs paths gracefully — return `None` / empty collections,
+  never panic. Many systems lack `/sys/class/typec/` or
+  `/sys/class/usb_power_delivery/`.
+- Source files derived from the original Swift code keep the attribution
+  header noting the WhatCable / Zetaphor port lineage where applicable.
+- Prefer `Option<T>` and `Result<T, E>` over sentinel values; prefer iterator
+  chains over manual loops where the chain is clearer.
+- Use `serde` derive for any type that may end up in `--json` output.
 
 ## Build
 
 ```bash
-cmake -B build
-cmake --build build
+cargo build --release                           # default (with --watch support)
+cargo build --release --no-default-features     # without libudev / --watch
 ```
 
 ## Testing
 
-- Run the CLI: `./build/src/cli/whatcable-linux`
-- JSON output: `./build/src/cli/whatcable-linux --json`
-- Watch mode: `./build/src/cli/whatcable-linux --watch`
+```bash
+cargo test --no-default-features
+```
+
+Manual smoke tests:
+
+- `./target/debug/whatcable-linux`
+- `./target/debug/whatcable-linux --json`
+- `./target/debug/whatcable-linux --watch`     (requires `watch` feature)
 
 ## Key Files to Know
 
 | File | Purpose |
 |---|---|
-| `src/core/UsbDevice.h/cpp` | Enumerates all USB devices from `/sys/bus/usb/devices/` |
-| `src/core/TypeCPort.h/cpp` | Reads USB-C port state from `/sys/class/typec/` |
-| `src/core/PDDecoder.h/cpp` | USB PD VDO bit-field decoding (ported from PDVDO.swift) |
-| `src/core/PowerDelivery.h/cpp` | Parses PDO lists from `/sys/class/usb_power_delivery/` |
-| `src/core/DeviceSummary.h/cpp` | Generates headlines, subtitles, bullets per device |
-| `src/core/ChargingDiagnostic.h/cpp` | Identifies USB-C charging bottlenecks |
-| `src/core/DeviceManager.h/cpp` | Aggregates all sources, correlates data, owns refresh logic |
-| `src/core/UDevMonitor.h/cpp` | libudev monitor + fd for `poll()` |
-| `src/core/VendorDB.h/cpp` | USB VID → vendor name lookup |
-| `src/core/UsbClassDB.h/cpp` | USB class code → human name |
+| `src/sysfs.rs` | Tiny helpers over `/sys` attribute reads — used by every module |
+| `src/usb.rs` | Enumerates all USB devices from `/sys/bus/usb/devices/` |
+| `src/typec.rs` | Reads USB-C port state from `/sys/class/typec/` |
+| `src/pd.rs` | USB PD VDO bit-field decoding (ported from PDVDO.swift) |
+| `src/power.rs` | Parses PDO lists from `/sys/class/usb_power_delivery/` |
+| `src/cable.rs` | Decoded cable e-marker info |
+| `src/diagnostic.rs` | Identifies USB-C charging bottlenecks |
+| `src/summary.rs` | Generates headlines, subtitles, bullets per device |
+| `src/manager.rs` | Aggregates all sources, correlates data, owns refresh logic |
+| `src/monitor.rs` | libudev monitor + fd for `poll()` (feature-gated) |
+| `src/watch.rs` | `--watch` event loop (binary-only, feature-gated) |
+| `src/output.rs` | Text and JSON renderers |
+| `src/vendor.rs` | USB VID → vendor name lookup |
+| `src/usbclass.rs` | USB class code → human name |
 
 ## Adding New Vendors
 
-Add entries to the `kVendors` map in `src/core/VendorDB.cpp`. Format: `{0xVID, "Vendor Name"}`.
+Add entries to `lookup()` in `src/vendor.rs`. Format: `0xVID => "Vendor Name"`.
 
 ## Adding New USB Class Codes
 
-Add cases to `UsbClassDB::className()` or `interfaceClassName()` in `src/core/UsbClassDB.cpp`.
+Add cases to `class_name()` in `src/usbclass.rs`.
+
+## Tests
+
+Each module under `src/` carries its own `#[cfg(test)] mod tests`. Cover any
+new bit-decoding, parsing, or label-formatting code with a small unit test
+that does not depend on `/sys/` (use in-memory inputs or `tempdir` for sysfs
+helpers).
