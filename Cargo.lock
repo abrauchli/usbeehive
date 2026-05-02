@@ -274,7 +274,6 @@ name = "whatcable-cli"
 version = "0.3.0"
 dependencies = [
  "clap",
- "libc",
  "serde_json",
  "whatcable-core",
  "whatcable-sysfs",
