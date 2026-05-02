@@ -7,46 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-05-02
 
-Major restructure: the project is now a Cargo workspace of four
-independently-published crates, with a real library API and a fixture-driven
-test suite.
+Major rewrite: the crate gains a real library API behind feature flags,
+a fixture-driven test suite, and several long-standing Type-C parsing
+bugs are fixed. Same install path (`cargo install whatcable`), same
+binary name (`whatcable`).
 
 ### Added
 
-- **`whatcable-core`** crate (new) — IO-free types + USB-PD VDO decoders +
-  diagnostics + summaries. Forbids `unsafe`, warns on missing docs.
-- **`whatcable-sysfs`** crate (new) — Linux `/sys` enumeration backend with
-  an injectable root path. `Sysfs::with_root()` lets tests/fixtures swap
-  `/sys` for a captured tree on disk; `Sysfs::try_with_root()` validates
-  existence. `DeviceManager::with_sysfs()` lets consumers pick the root.
-  Public `Snapshot` struct exposes the structured `usb_devices`,
-  `typec_ports`, `pd_ports`, and `summaries` together. New `Error` /
-  `Result` types in `error.rs`.
-- **`whatcable-watch`** crate (new) — libudev hotplug monitor. `Watcher`
-  for low-level `poll(2)` integration; `run_loop()` for a debounced
-  render loop with built-in `SIGINT` / `SIGTERM` handling.
-- **`whatcable`** binary — new `--sysfs-root <PATH>` flag for running
-  against captured fixture trees.
-- `TypeCPowerSupply::negotiated_power_mw()` — `i128`-safe live wattage
-  helper, deduplicated from two prior call sites in summary / JSON output.
+- **Feature-gated library API.** Three layers, each toggled by a Cargo feature:
+  - **(default-off `cli`)** — the `whatcable` binary (clap + JSON / text rendering).
+  - **(default-on `sysfs`)** — Linux `/sys` enumeration: `Sysfs` handle with
+    injectable root, `DeviceManager`, `Snapshot`, `Error`, `Result`.
+  - **(default-on `watch`)** — libudev hotplug: `watch::Watcher`,
+    `watch::run_loop`, debounced render loop with `SIGINT` / `SIGTERM` handling.
+  - Pure-decoder library use: `default-features = false`. Only `serde` is pulled.
+- **`Sysfs::with_root(path)`** — injectable sysfs root for fixture-based testing
+  and offline analysis. `Sysfs::try_with_root(path)` validates the path is a
+  directory, returning `Error::InvalidRoot` otherwise.
+- **`DeviceManager::with_sysfs(sysfs)`** + `Snapshot` struct — exposes the
+  structured `usb_devices`, `typec_ports`, `pd_ports`, and `summaries`
+  together so callers don't have to reach through accessor methods.
+- **`TypeCPowerSupply::negotiated_power_mw()`** — `i128`-safe live wattage
+  helper, computed from `voltage_now × current_now`. Used by both the
+  human-readable bullet and the JSON `negotiatedPowerMW` field.
+- **`--sysfs-root <PATH>`** CLI flag, useful for running the binary against
+  captured fixture trees (and used by the new end-to-end smoke tests).
 - Five runnable `examples/` — `decode_cable_vdo`, `cable_info`,
   `list_devices`, `snapshot_diff`, `print_changes`.
-- 97 tests across the workspace (up from ~30), including end-to-end CLI
-  smoke tests that build a sysfs tree on disk and exercise the binary.
+- 98 tests, up from ~30. Includes end-to-end CLI smoke tests that build a
+  sysfs tree on disk and exercise the binary, plus integration tests
+  covering charging diagnostics, PPS PDO parsing, deep USB topology, and
+  cable-bottleneck detection.
 - New CI workflow (`.github/workflows/ci.yml`): test matrix
   (default + `--no-default-features`), `cargo fmt --check`, `cargo clippy
-  --all-targets -D warnings`, MSRV (1.74) build, rustdoc with
-  `-D warnings`.
-- Per-crate `README.md` and crate-level doc comments on every public item.
-- Workspace `CHANGELOG.md` (this file).
+  --all-targets -D warnings`, MSRV (1.74) build, rustdoc with `-D warnings`.
+- Crate-level doc comments on every public item; runnable doctest in `lib.rs`.
+- This `CHANGELOG.md`.
 
 ### Changed
 
-- The bin crate (`whatcable`) lives at `crates/whatcable-cli/`. Library
-  consumers depend on the new specialized crates above; downstream tools
-  no longer have to pull in the whole binary's dependency tree.
-- `ProductType` and `PdoType` use `#[derive(Default)]` + `#[default]`
-  rather than hand-written `impl Default`.
+- Library reorganisation. The previous flat `whatcable::*` re-exports remain
+  the recommended entry point (`whatcable::DeviceManager`, `whatcable::pd::…`),
+  but internal modules moved: sysfs IO is now under `whatcable::sysfs::*`.
+- `ProductType` and `PdoType` use `#[derive(Default)]` + `#[default]` rather
+  than hand-written `impl Default`.
 - Workspace-wide rustfmt; clippy clean under `-D warnings`.
 
 ### Fixed
@@ -76,17 +80,19 @@ fixture-driven integration tests:
 
 ### Migration from 0.2.1
 
-- `cargo install whatcable` — same as before, now installs the
-  workspace's bin crate at 0.3.0.
-- The published `whatcable` package is no longer a library. Library code
-  that depended on `whatcable::*` should switch to:
-  - `whatcable_core::*` for types and decoders,
-  - `whatcable_sysfs::*` for enumeration,
-  - `whatcable_watch::*` for hotplug.
-- `UsbDevice::enumerate()` / `TypeCPort::enumerate()` /
+For most users — `cargo install whatcable` works exactly as before;
+binary behavior is unchanged.
+
+For library consumers:
+
+- The previous `UsbDevice::enumerate()` / `TypeCPort::enumerate()` /
   `PowerDeliveryPort::enumerate()` (which read `/sys` directly) are gone.
-  Use `whatcable_sysfs::Sysfs::linux().usb_devices()` etc., or
+  Use `whatcable::Sysfs::linux().usb_devices()` etc., or
   `DeviceManager::new()` for the bundled aggregate.
+- `whatcable::manager::DeviceManager` moved to `whatcable::DeviceManager`
+  (re-exported from the new `whatcable::sysfs::manager`).
+- Want to drop the libudev / clap dependency tree? Set
+  `default-features = false` and pick exactly the layer you need.
 
 ## [0.2.1] - 2025
 

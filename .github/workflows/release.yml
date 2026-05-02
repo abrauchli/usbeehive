@@ -23,10 +23,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build
-        run: cargo build --release --locked --workspace
+        run: cargo build --release --locked
 
       - name: Test
-        run: cargo test --release --locked --workspace
+        run: cargo test --release --locked
 
       - name: Package CLI binary
         run: |

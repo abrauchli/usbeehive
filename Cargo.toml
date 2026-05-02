@@ -1,32 +1,60 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/whatcable-core",
-    "crates/whatcable-sysfs",
-    "crates/whatcable-watch",
-    "crates/whatcable-cli",
-]
-
-[workspace.package]
+[package]
+name = "whatcable"
 version = "0.3.0"
 edition = "2021"
 license = "MIT"
 authors = ["Andreas Brauchli"]
+description = "Tells you what each USB cable / device on Linux can actually do. Rust port of WhatCable."
 repository = "https://github.com/Zetaphor/whatcable-linux"
 homepage = "https://github.com/Zetaphor/whatcable-linux"
+readme = "README.md"
 rust-version = "1.74"
 keywords = ["usb", "usb-c", "power-delivery", "sysfs", "cli"]
 categories = ["command-line-utilities", "hardware-support", "os::linux-apis"]
 
-[workspace.dependencies]
-whatcable-core = { version = "0.3.0", path = "crates/whatcable-core" }
-whatcable-sysfs = { version = "0.3.0", path = "crates/whatcable-sysfs" }
-whatcable-watch = { version = "0.3.0", path = "crates/whatcable-watch" }
+[lib]
+name = "whatcable"
+path = "src/lib.rs"
+
+[[bin]]
+name = "whatcable"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[dependencies]
 serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", optional = true }
+clap = { version = "4", features = ["derive"], optional = true }
+udev = { version = "0.9", optional = true }
+libc = { version = "0.2", optional = true }
+
+[dev-dependencies]
 serde_json = "1"
-clap = { version = "4", features = ["derive"] }
-udev = "0.9"
-libc = "0.2"
+
+[features]
+default = ["cli", "sysfs", "watch"]
+# `sysfs` enables the Linux /sys backend (Sysfs, DeviceManager, Snapshot).
+# Disable to use the crate as a pure-decoder library.
+sysfs = []
+# `watch` enables the libudev hotplug monitor (Watcher, run_loop).
+watch = ["dep:udev", "dep:libc", "sysfs"]
+# `cli` enables the `whatcable` binary.
+cli = ["dep:serde_json", "dep:clap", "sysfs"]
+
+[[example]]
+name = "list_devices"
+required-features = ["sysfs"]
+
+[[example]]
+name = "snapshot_diff"
+required-features = ["sysfs"]
+
+[[example]]
+name = "print_changes"
+required-features = ["watch"]
+
+[lints.rust]
+missing_docs = "warn"
 
 [profile.release]
 lto = "thin"

@@ -2,8 +2,8 @@
 
 > **What can this USB cable actually do?**
 
-A command-line tool, and a set of Rust libraries, that tell you in plain
-English what each USB device plugged into your Linux machine can actually do.
+A command-line tool, and a Rust library, that tell you in plain English
+what each USB device plugged into your Linux machine can actually do.
 
 **WhatCable is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable),
 a macOS menu-bar app by [Darryl Morley](https://github.com/darrylmorley).**
@@ -13,23 +13,6 @@ rich USB-C Power Delivery diagnostics from the original.
 The Rust rewrite is forked from
 [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux)
 (originally C++ / CMake).
-
-## Workspace layout
-
-| Crate | Purpose |
-|---|---|
-| [`whatcable-core`](crates/whatcable-core) | Pure data types + USB-PD VDO decoders + diagnostics. No IO. |
-| [`whatcable-sysfs`](crates/whatcable-sysfs) | Linux `/sys` backend with an injectable root. Returns `whatcable-core` types. |
-| [`whatcable-watch`](crates/whatcable-watch) | libudev hotplug monitor; debounced render-loop helper. |
-| [`whatcable`](crates/whatcable-cli) | The `whatcable` binary, with `--json` / `--watch` / `--raw` / `--sysfs-root`. |
-
-If you want **the CLI**, install `whatcable`. If you want a **library**,
-pick the smallest crate that covers your need:
-
-- decoding USB-PD VDOs in isolation? Just `whatcable-core`.
-- enumerating `/sys` and getting `DeviceSummary` lists? `whatcable-sysfs`
-  (which re-exports `whatcable-core`).
-- hotplug events? Add `whatcable-watch`.
 
 ## What it shows
 
@@ -45,8 +28,9 @@ pick the smallest crate that covers your need:
 ### USB-C ports (additional detail)
 - **Port roles**: data role (host/device), power role (source/sink)
 - **Cable e-marker info**: cable speed capability, current rating (3A/5A), active vs passive, cable vendor
-- **Charger PDO list**: every voltage/current profile the charger advertises, with the active profile highlighted
+- **Charger PDO list**: every voltage / current profile the charger advertises, with the active profile highlighted
 - **Charging diagnostics**: identifies bottlenecks — cable limiting speed, charger undersized, etc.
+- **Live wattage** (UCSI): `voltage_now × current_now`, exposed as `negotiatedPowerMW` in JSON output and via `TypeCPowerSupply::negotiated_power_mw()` in the library.
 - **Partner identity**: decoded from PD Discover Identity VDOs
 
 ## Install
@@ -74,16 +58,16 @@ sudo pacman -S --needed systemd-libs pkgconf
 ```
 
 ```bash
-cargo build --release                                                   # default (with --watch)
-cargo build --release -p whatcable --no-default-features                # no libudev
+cargo build --release                                  # default (with --watch)
+cargo build --release --no-default-features --features cli,sysfs    # no libudev
 sudo install -Dm755 target/release/whatcable /usr/local/bin/whatcable
 ```
 
 ### Tests
 
 ```bash
-cargo test --workspace --no-default-features    # avoids libudev requirement
-cargo test --workspace                          # full suite, requires libudev-dev
+cargo test                                # full suite (requires libudev-dev)
+cargo test --no-default-features          # pure-decoder subset, no libudev
 ```
 
 ## CLI usage
@@ -100,10 +84,33 @@ whatcable --help
 
 ## Library usage
 
-Decode a Cable VDO without any IO:
+The crate has three optional layers, each behind a Cargo feature so
+consumers pull in only what they need.
+
+| Feature | Default | Adds |
+|---|---|---|
+| (none) | always | Data types, USB-PD VDO decoders, diagnostics, summaries — IO-free. |
+| `sysfs` | yes | `Sysfs` handle + `DeviceManager` — Linux `/sys` enumeration with injectable root. |
+| `watch` | yes | libudev hotplug monitor: `watch::Watcher` + `watch::run_loop`. |
+| `cli` | yes | The `whatcable` binary (clap + JSON / text rendering). |
+
+Library-only consumers can drop the binary deps:
+
+```toml
+# Pure decoders, no IO, no libudev:
+whatcable = { version = "0.3", default-features = false }
+
+# Add /sys enumeration:
+whatcable = { version = "0.3", default-features = false, features = ["sysfs"] }
+
+# Add hotplug too:
+whatcable = { version = "0.3", default-features = false, features = ["watch"] }
+```
+
+### Decode a Cable VDO
 
 ```rust
-use whatcable_core::pd::{decode_cable_vdo, CableSpeed, CableCurrent};
+use whatcable::pd::{decode_cable_vdo, CableSpeed, CableCurrent};
 
 let v = decode_cable_vdo(2 | (2 << 5) | (3 << 9), false);
 assert_eq!(v.speed, CableSpeed::Usb32Gen2);
@@ -111,10 +118,10 @@ assert_eq!(v.current_rating, CableCurrent::FiveAmp);
 assert_eq!(v.max_watts, 250);
 ```
 
-Enumerate the system's USB tree:
+### Enumerate the system's USB tree
 
 ```rust,no_run
-use whatcable_sysfs::DeviceManager;
+use whatcable::DeviceManager;
 
 let mut mgr = DeviceManager::new();
 mgr.refresh();
@@ -123,12 +130,11 @@ for s in mgr.devices() {
 }
 ```
 
-Run a debounced render loop on hotplug events:
+### Run a debounced render loop on hotplug events
 
 ```rust,no_run
 use std::time::Duration;
-use whatcable_watch::run_loop;
-use whatcable_sysfs::DeviceManager;
+use whatcable::{watch::run_loop, DeviceManager};
 
 let mut mgr = DeviceManager::new();
 run_loop(Duration::from_millis(500), |_reason| {
@@ -138,7 +144,7 @@ run_loop(Duration::from_millis(500), |_reason| {
 }).unwrap();
 ```
 
-See [`crates/*/examples/`](crates) for more.
+See [`examples/`](examples) for more.
 
 ## How it works
 
@@ -150,6 +156,7 @@ required for basic info:
 | `/sys/bus/usb/devices/` | All USB devices: vendor, product, speed, power, class, interfaces, topology |
 | `/sys/class/typec/` | USB-C port state: connection, roles, cable e-marker, partner identity |
 | `/sys/class/usb_power_delivery/` | PD negotiation: PDO list from charger, active profile, PPS ranges |
+| `/sys/class/power_supply/ucsi-source-psy-*` | Live `voltage_now × current_now` charging readout |
 
 Hotplug uses `libudev` to detect connect/disconnect events in real time.
 
@@ -158,7 +165,7 @@ ported from the original WhatCable's Swift implementation.
 
 ## Caveats
 
-- **USB-C/PD data availability varies by hardware.** The Type-C connector
+- **USB-C / PD data availability varies by hardware.** The Type-C connector
   class and USB PD sysfs interfaces depend on the kernel driver
   (UCSI, TCPM, platform-specific). Some systems expose full PD negotiation
   data; others expose only basic port info or nothing at all.

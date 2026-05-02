@@ -3,79 +3,65 @@
 ## Project overview
 
 WhatCable is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable)
-(macOS) by Darryl Morley — a CLI tool that shows USB device and USB-C
-cable information by reading Linux sysfs.
+(macOS) by Darryl Morley — a CLI tool, and a Rust library, that show USB
+device and USB-C cable information by reading Linux sysfs.
 
-This repository is a Rust rewrite of the original C++/CMake implementation,
-organised as a Cargo workspace.
+This repository is a Rust rewrite of the original C++ / CMake
+implementation, organised as a single Cargo crate with feature-gated
+layers.
 
-## Workspace layout
+## Layout
 
 ```
 whatcable/
-├── Cargo.toml                       # virtual workspace manifest
-├── crates/
-│   ├── whatcable-core/              # pure types + USB-PD decoders, no IO
-│   │   ├── src/{cable,diagnostic,pd,power,summary,typec,usb,usbclass,vendor}.rs
-│   │   └── examples/{decode_cable_vdo,cable_info}.rs
-│   ├── whatcable-sysfs/             # /sys backend with injectable root
-│   │   ├── src/{error,manager,power,sysfs,typec,usb}.rs
-│   │   ├── tests/{fixture_builder,usb_enumeration,typec_pd_scenarios}.rs
-│   │   └── examples/{list_devices,snapshot_diff}.rs
-│   ├── whatcable-watch/             # libudev hotplug
-│   │   ├── src/lib.rs               # Watcher + run_loop + WaitResult
-│   │   └── examples/print_changes.rs
-│   └── whatcable-cli/               # the `whatcable` binary
-│       ├── src/{main,output}.rs
-│       └── tests/cli_smoke.rs
-├── README.md / AGENTS.md
-└── .github/workflows/release.yml
+├── Cargo.toml                          # one package
+├── src/
+│   ├── lib.rs                          # public re-exports + module roots
+│   ├── main.rs                         # CLI entry (gated on `cli` feature)
+│   ├── output.rs                       # CLI text / JSON rendering
+│   ├── pd.rs                           # USB-PD VDO decoders        ← always
+│   ├── usb.rs                          # UsbDevice / UsbInterface   ← always
+│   ├── typec.rs                        # TypeCPort / Cable / …      ← always
+│   ├── power.rs                        # PowerDataObject / Port     ← always
+│   ├── cable.rs                        # CableInfo                  ← always
+│   ├── diagnostic.rs                   # ChargingDiagnostic         ← always
+│   ├── summary.rs                      # DeviceSummary              ← always
+│   ├── usbclass.rs / vendor.rs         # lookup tables              ← always
+│   ├── sysfs/                          ← #[cfg(feature = "sysfs")]
+│   │   ├── mod.rs / reader.rs          # Sysfs handle + read helpers
+│   │   ├── usb.rs / typec.rs / power.rs # impl Sysfs::*
+│   │   ├── manager.rs                  # DeviceManager + Snapshot
+│   │   └── error.rs                    # Error / Result
+│   └── watch.rs                        ← #[cfg(feature = "watch")]
+├── tests/
+│   ├── fixture_builder.rs              # programmatic sysfs-tree builder
+│   ├── usb_enumeration.rs              # gated on `sysfs`
+│   ├── typec_pd_scenarios.rs           # gated on `sysfs`
+│   └── cli_smoke.rs                    # gated on `cli`
+├── examples/{decode_cable_vdo,cable_info,list_devices,snapshot_diff,print_changes}.rs
+├── CHANGELOG.md / README.md / AGENTS.md
+└── .github/workflows/{ci,release}.yml
 ```
 
-## Architecture
+## Features
 
-The crates form a one-way dependency chain:
+| Feature | Default | Pulls in | Adds |
+|---|---|---|---|
+| (none) | always | `serde` | Pure types + decoders + diagnostics |
+| `sysfs` | yes | `std::fs` | `/sys` enumeration, `Sysfs`, `DeviceManager` |
+| `watch` | yes | `udev`, `libc` | libudev hotplug (`Watcher`, `run_loop`) — implies `sysfs` |
+| `cli` | yes | `clap`, `serde_json` | `whatcable` binary — implies `sysfs` |
 
-```
-whatcable-core ←──── whatcable-sysfs ←──── whatcable-cli
-                                       ↘
-                                     whatcable-watch (independent)
-```
-
-- **`whatcable-core`** is IO-free. Forbids `unsafe` (`#![forbid(unsafe_code)]`)
-  and warns on missing docs. Holds the data types every backend produces
-  and the PD VDO decoders. Adding a non-Linux backend (BSD-equivalent,
-  remote inventory, parser for `lsusb -t` output) means: new crate that
-  produces `UsbDevice` / `TypeCPort` / etc.
-- **`whatcable-sysfs`** owns all `std::fs` reads under `/sys`. The root
-  path is injected via `Sysfs::with_root()` — *no module reads `/sys/...`
-  directly*, so fixture trees swap in cleanly.
-- **`whatcable-watch`** is a thin wrapper over the `udev` crate, plus the
-  signal-handler / debounce loop the CLI used to embed.
-- **`whatcable-cli`** is the binary + JSON / text output. Library
-  consumers should never depend on this crate.
-
-## Key data flow (sysfs runtime)
-
-```
-sysfs::Sysfs (root path)
-  → /sys/bus/usb/devices/         → sysfs::usb::enumerate_in
-  → /sys/class/typec/             → sysfs::typec::enumerate_in
-  → /sys/class/usb_power_delivery → sysfs::power::enumerate_in
-                                       ↓
-                              sysfs::manager::DeviceManager
-                                       ↓
-                              core::summary::DeviceSummary
-                                       ↓
-                              cli::output::print_text / print_json
-```
+`watch` and `cli` both transitively enable `sysfs`. Pure-decoder consumers
+go `default-features = false` and get a `serde`-only build.
 
 ## Code conventions
 
-- Rust 2021, MSRV 1.74. Workspace-level dependencies live in the root
-  `Cargo.toml`'s `[workspace.dependencies]` table.
-- All sysfs reads go through `whatcable_sysfs::sysfs` — never read `/sys/`
-  directly with raw `std::fs` from anywhere else in the workspace.
+- Rust 2021, MSRV 1.74. Crate-level `#![warn(missing_docs)]`,
+  `#![deny(unsafe_code)]` (the watch module re-allows unsafe locally to
+  call `libc::poll` / `libc::signal`).
+- All sysfs reads go through `crate::sysfs::reader` — never read `/sys/`
+  directly with raw `std::fs` from outside that module.
 - Handle missing sysfs paths gracefully — return `None` / empty
   collections, never panic. Many systems lack `/sys/class/typec/` or
   `/sys/class/usb_power_delivery/`.
@@ -92,15 +78,16 @@ sysfs::Sysfs (root path)
 ## Build
 
 ```bash
-cargo build --workspace --release                          # default (with --watch)
-cargo build -p whatcable-cli --release --no-default-features    # no libudev
+cargo build --release                                          # default (cli + sysfs + watch)
+cargo build --release --no-default-features --features cli,sysfs    # no libudev
+cargo build --release --no-default-features                    # library, pure decoders only
 ```
 
 ## Testing
 
 ```bash
-cargo test --workspace --no-default-features    # no libudev required
-cargo test --workspace                          # full, requires libudev-dev
+cargo test                          # full suite, requires libudev-dev (98 tests)
+cargo test --no-default-features    # decoders only, no libudev (50 tests)
 ```
 
 Manual smoke tests:
@@ -108,9 +95,9 @@ Manual smoke tests:
 - `./target/debug/whatcable`
 - `./target/debug/whatcable --json`
 - `./target/debug/whatcable --watch`     (requires `watch` feature)
-- `./target/debug/whatcable --sysfs-root tests/fixture-root`     (against a captured tree)
+- `./target/debug/whatcable --sysfs-root tests/fixture-root`
 
-## Adding a new sysfs backend or test scenario
+## Adding a new sysfs scenario
 
 1. Build the desired tree with `tests/fixture_builder.rs` helpers
    (`UsbDeviceFixture`, `write_typec_port`, `write_typec_cable`,
@@ -119,16 +106,16 @@ Manual smoke tests:
 3. Assert against `mgr.snapshot()` — `usb_devices`, `typec_ports`,
    `pd_ports`, or the rendered `summaries`.
 
-## Key files to know
+## Key files
 
 | File | Purpose |
 |---|---|
-| `crates/whatcable-core/src/pd.rs` | USB-PD VDO bit-field decoders |
-| `crates/whatcable-core/src/diagnostic.rs` | Charging-bottleneck classifier |
-| `crates/whatcable-core/src/summary.rs` | Plain-English `DeviceSummary` |
-| `crates/whatcable-sysfs/src/sysfs.rs` | `Sysfs` handle + read helpers |
-| `crates/whatcable-sysfs/src/manager.rs` | `DeviceManager` + `Snapshot` |
-| `crates/whatcable-sysfs/tests/fixture_builder.rs` | Programmatic sysfs-tree builder for tests |
-| `crates/whatcable-watch/src/lib.rs` | `Watcher` + `run_loop` |
-| `crates/whatcable-cli/src/output.rs` | Text + JSON rendering |
-| `crates/whatcable-cli/src/main.rs` | CLI parser + dispatch |
+| `src/pd.rs` | USB-PD VDO bit-field decoders |
+| `src/diagnostic.rs` | Charging-bottleneck classifier |
+| `src/summary.rs` | Plain-English `DeviceSummary` |
+| `src/sysfs/reader.rs` | `Sysfs` handle + `read_attr` / `read_int` / `read_hex` |
+| `src/sysfs/manager.rs` | `DeviceManager` + `Snapshot` |
+| `src/watch.rs` | `Watcher` + `run_loop` |
+| `src/output.rs` | CLI text + JSON rendering |
+| `src/main.rs` | CLI parser + dispatch |
+| `tests/fixture_builder.rs` | Programmatic sysfs-tree builder |

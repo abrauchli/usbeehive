@@ -274,33 +274,9 @@ name = "whatcable"
 version = "0.3.0"
 dependencies = [
  "clap",
- "serde_json",
- "whatcable-core",
- "whatcable-sysfs",
- "whatcable-watch",
-]
-
-[[package]]
-name = "whatcable-core"
-version = "0.3.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "whatcable-sysfs"
-version = "0.3.0"
-dependencies = [
- "serde",
- "serde_json",
- "whatcable-core",
-]
-
-[[package]]
-name = "whatcable-watch"
-version = "0.3.0"
-dependencies = [
  "libc",
+ "serde",
+ "serde_json",
  "udev",
 ]
 
