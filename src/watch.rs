@@ -19,8 +19,8 @@ extern "C" fn on_signal(_: libc::c_int) {
 pub fn run(mgr: &mut DeviceManager, use_json: bool, show_raw: bool) -> io::Result<()> {
     RUNNING.store(true, Ordering::SeqCst);
     unsafe {
-        libc::signal(libc::SIGINT, on_signal as usize);
-        libc::signal(libc::SIGTERM, on_signal as usize);
+        libc::signal(libc::SIGINT, on_signal as *const () as usize);
+        libc::signal(libc::SIGTERM, on_signal as *const () as usize);
     }
 
     let mut monitor = UdevMonitor::new()?;
