@@ -11,36 +11,36 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: fedora:43
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
         run: |
-          dnf install -y gcc-c++ cmake pkgconf-pkg-config \
-            systemd-devel tar gzip
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
 
-      - name: Configure
-        run: cmake -B build -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cargo build --release --locked
+
+      - name: Test
+        run: cargo test --release --locked
 
       - name: Package CLI binary
         run: |
-          mkdir -p build/dist
-          cp build/src/cli/whatcable-linux build/dist/
-          cd build/dist
-          tar czf ../whatcable-linux-cli-${GITHUB_REF_NAME}-x86_64.tar.gz whatcable-linux
+          mkdir -p target/dist
+          cp target/release/whatcable-linux target/dist/
+          cd target/dist
+          tar czf ../whatcable-${GITHUB_REF_NAME}-x86_64-linux.tar.gz whatcable-linux
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-assets
           path: |
-            build/whatcable-linux-cli-*.tar.gz
+            target/whatcable-*.tar.gz
 
   release:
     needs: build
@@ -63,13 +63,19 @@ jobs:
 
             | File | Description |
             |------|-------------|
-            | `whatcable-linux-cli-${{ github.ref_name }}-x86_64.tar.gz` | CLI binary. Extract and run `./whatcable-linux`. |
+            | `whatcable-${{ github.ref_name }}-x86_64-linux.tar.gz` | CLI binary. Extract and run `./whatcable-linux`. |
 
             ### Quick install
 
             ```bash
-            tar xzf whatcable-linux-cli-${{ github.ref_name }}-x86_64.tar.gz
+            tar xzf whatcable-${{ github.ref_name }}-x86_64-linux.tar.gz
             sudo mv whatcable-linux /usr/local/bin/
+            ```
+
+            Or via Cargo:
+
+            ```bash
+            cargo install whatcable
             ```
           files: |
             assets/**/*.tar.gz

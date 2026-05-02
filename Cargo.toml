@@ -1,6 +1,6 @@
 [package]
 name = "whatcable"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "Tells you what each USB cable/device on Linux can actually do. Rust port of WhatCable."
