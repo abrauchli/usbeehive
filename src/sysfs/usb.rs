@@ -134,10 +134,9 @@ fn build_topology(devices: &mut [UsbDevice]) {
     order.sort_by_key(|&i| std::cmp::Reverse(bus_port_depth(&devices[i].bus_port)));
 
     for i in order {
-        if devices[i].is_root_hub {
+        let Some(parent) = devices[i].parent_bus_port() else {
             continue;
-        }
-        let parent = parent_bus_port(&devices[i].bus_port);
+        };
         if let Some(&pi) = idx.get(&parent) {
             if pi == i {
                 continue;
@@ -154,16 +153,6 @@ fn bus_port_depth(bp: &str) -> usize {
     } else {
         bp.matches('.').count() + 1
     }
-}
-
-fn parent_bus_port(bp: &str) -> String {
-    if let Some((head, _)) = bp.rsplit_once('.') {
-        return head.to_string();
-    }
-    if let Some((bus, _)) = bp.split_once('-') {
-        return format!("usb{bus}");
-    }
-    String::new()
 }
 
 pub(crate) fn enumerate_in(base: &Path) -> Vec<UsbDevice> {
@@ -194,13 +183,6 @@ mod tests {
         assert_eq!(parse_max_power("100"), 100);
         assert_eq!(parse_max_power(""), 0);
         assert_eq!(parse_max_power("garbage"), 0);
-    }
-
-    #[test]
-    fn parent_bus_port_rules() {
-        assert_eq!(parent_bus_port("1-1.4.2"), "1-1.4");
-        assert_eq!(parent_bus_port("1-1"), "usb1");
-        assert_eq!(parent_bus_port("usb1"), "");
     }
 
     #[test]

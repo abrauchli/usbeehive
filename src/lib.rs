@@ -69,7 +69,7 @@ pub use diagnostic::{Bottleneck, ChargingDiagnostic};
 pub use power::{PdoType, PowerDataObject, PowerDeliveryPort};
 pub use summary::{Category, DeviceSummary, Status};
 pub use typec::{TypeCCable, TypeCIdentity, TypeCPartner, TypeCPort, TypeCPowerSupply};
-pub use usb::{UsbDevice, UsbInterface};
+pub use usb::{LinkSpeed, UsbDevice, UsbInterface};
 
 #[cfg(feature = "sysfs")]
 pub use sysfs::{

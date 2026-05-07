@@ -1,14 +1,13 @@
 //! Text and JSON rendering for [`DeviceManager`].
 
-use std::collections::HashSet;
 use std::io::{self, Write};
 
 use serde_json::{json, Map, Value};
 use whatcable::pd::{cable_current_label, cable_speed_label};
 use whatcable::summary::{Category, DeviceSummary};
-use whatcable::usb::UsbDevice;
+use whatcable::usb::{tree_roots, UsbDevice};
 use whatcable::usbclass;
-use whatcable::DeviceManager;
+use whatcable::{DeviceManager, LinkSpeed};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -117,7 +116,7 @@ pub fn print_tree<W: Write>(w: &mut W, mgr: &DeviceManager) -> io::Result<()> {
     }
 
     let usb = mgr.usb_devices();
-    let roots = collect_tree_roots(usb);
+    let roots = tree_roots(usb);
     if roots.is_empty() {
         if !printed_anything {
             return writeln!(w, "No USB devices found.");
@@ -153,7 +152,7 @@ fn print_typec_summary<W: Write>(w: &mut W, dev: &DeviceSummary) -> io::Result<(
 }
 
 fn print_root<W: Write>(w: &mut W, dev: &UsbDevice) -> io::Result<()> {
-    let color = speed_color(dev.speed);
+    let color = speed_color(dev.link_speed_tier());
     if dev.is_root_hub {
         writeln!(
             w,
@@ -180,7 +179,7 @@ fn print_branch<W: Write>(
     parent: &UsbDevice,
 ) -> io::Result<()> {
     let connector = if last { "└─ " } else { "├─ " };
-    let color = speed_color(dev.speed);
+    let color = speed_color(dev.link_speed_tier());
     let style = if dev.is_hub { ITALIC } else { "" };
     let name = dev.display_name();
 
@@ -220,29 +219,29 @@ fn print_legend<W: Write>(w: &mut W) -> io::Result<()> {
     )
 }
 
-fn speed_color(mbps: u32) -> &'static str {
-    // Speeds <12 Mbps and unknown both bucket to gray. Some Low-Speed devices
-    // report `speed = "1.5"` which fails int parse and arrives here as 0.
-    match mbps {
-        s if s >= 40000 => BRIGHT_MAGENTA,
-        s if s >= 20000 => MAGENTA,
-        s if s >= 10000 => BRIGHT_BLUE,
-        s if s >= 5000 => CYAN,
-        s if s >= 480 => GREEN,
-        s if s >= 12 => YELLOW,
-        _ => BRIGHT_BLACK,
+fn speed_color(tier: LinkSpeed) -> &'static str {
+    // Low Speed and Unknown both bucket to gray. Some Low-Speed devices
+    // report `speed = "1.5"` which fails int parse and falls into Unknown.
+    match tier {
+        LinkSpeed::Usb4 => BRIGHT_MAGENTA,
+        LinkSpeed::SuperPlus20 => MAGENTA,
+        LinkSpeed::SuperPlus => BRIGHT_BLUE,
+        LinkSpeed::Super => CYAN,
+        LinkSpeed::High => GREEN,
+        LinkSpeed::Full => YELLOW,
+        LinkSpeed::Low | LinkSpeed::Unknown => BRIGHT_BLACK,
     }
 }
 
 fn root_label(d: &UsbDevice) -> &'static str {
-    match d.speed {
-        s if s >= 40000 => "USB4 root",
-        s if s >= 20000 => "USB 3.2 root",
-        s if s >= 10000 => "USB 3.1 root",
-        s if s >= 5000 => "USB 3.0 root",
-        s if s >= 480 => "USB 2.0 root",
-        s if s >= 12 => "USB 1.1 root",
-        _ => "USB root",
+    match d.link_speed_tier() {
+        LinkSpeed::Usb4 => "USB4 root",
+        LinkSpeed::SuperPlus20 => "USB 3.2 root",
+        LinkSpeed::SuperPlus => "USB 3.1 root",
+        LinkSpeed::Super => "USB 3.0 root",
+        LinkSpeed::High => "USB 2.0 root",
+        LinkSpeed::Full => "USB 1.1 root",
+        LinkSpeed::Low | LinkSpeed::Unknown => "USB root",
     }
 }
 
@@ -256,31 +255,6 @@ fn first_class_name(dev: &UsbDevice) -> String {
             continue;
         }
         return name;
-    }
-    String::new()
-}
-
-/// A "tree root" is a device with no parent in `devs` — either a kernel
-/// root hub (`is_root_hub`) or an orphan whose parent isn't enumerated
-/// (e.g. a fixture-only device with no `usbN` entry).
-fn collect_tree_roots(devs: &[UsbDevice]) -> Vec<&UsbDevice> {
-    let names: HashSet<&str> = devs.iter().map(|d| d.bus_port.as_str()).collect();
-    devs.iter()
-        .filter(|d| {
-            if d.is_root_hub {
-                return true;
-            }
-            !names.contains(parent_bus_port(&d.bus_port).as_str())
-        })
-        .collect()
-}
-
-fn parent_bus_port(bp: &str) -> String {
-    if let Some((head, _)) = bp.rsplit_once('.') {
-        return head.to_string();
-    }
-    if let Some((bus, _)) = bp.split_once('-') {
-        return format!("usb{bus}");
     }
     String::new()
 }
@@ -508,14 +482,14 @@ mod tests {
 
     #[test]
     fn speed_color_buckets() {
-        assert_eq!(speed_color(0), BRIGHT_BLACK);
-        assert_eq!(speed_color(1), BRIGHT_BLACK);
-        assert_eq!(speed_color(12), YELLOW);
-        assert_eq!(speed_color(480), GREEN);
-        assert_eq!(speed_color(5_000), CYAN);
-        assert_eq!(speed_color(10_000), BRIGHT_BLUE);
-        assert_eq!(speed_color(20_000), MAGENTA);
-        assert_eq!(speed_color(40_000), BRIGHT_MAGENTA);
+        assert_eq!(speed_color(LinkSpeed::Unknown), BRIGHT_BLACK);
+        assert_eq!(speed_color(LinkSpeed::Low), BRIGHT_BLACK);
+        assert_eq!(speed_color(LinkSpeed::Full), YELLOW);
+        assert_eq!(speed_color(LinkSpeed::High), GREEN);
+        assert_eq!(speed_color(LinkSpeed::Super), CYAN);
+        assert_eq!(speed_color(LinkSpeed::SuperPlus), BRIGHT_BLUE);
+        assert_eq!(speed_color(LinkSpeed::SuperPlus20), MAGENTA);
+        assert_eq!(speed_color(LinkSpeed::Usb4), BRIGHT_MAGENTA);
     }
 
     #[test]
@@ -529,36 +503,6 @@ mod tests {
         assert_eq!(root_label(&d), "USB 3.1 root");
         d.speed = 40_000;
         assert_eq!(root_label(&d), "USB4 root");
-    }
-
-    #[test]
-    fn parent_bus_port_resolves_levels() {
-        assert_eq!(parent_bus_port("5-2.4.1"), "5-2.4");
-        assert_eq!(parent_bus_port("1-1"), "usb1");
-        assert_eq!(parent_bus_port("usb5"), "");
-    }
-
-    #[test]
-    fn collect_tree_roots_includes_orphans_and_root_hubs() {
-        let root = UsbDevice {
-            bus_port: "usb1".into(),
-            is_root_hub: true,
-            ..Default::default()
-        };
-        let attached = UsbDevice {
-            bus_port: "1-1".into(),
-            ..Default::default()
-        };
-        let orphan = UsbDevice {
-            bus_port: "9-9".into(),
-            ..Default::default()
-        };
-        let devs = vec![root, attached, orphan];
-        let roots = collect_tree_roots(&devs);
-        let names: Vec<&str> = roots.iter().map(|d| d.bus_port.as_str()).collect();
-        assert!(names.contains(&"usb1"));
-        assert!(names.contains(&"9-9"));
-        assert!(!names.contains(&"1-1"));
     }
 
     #[test]
