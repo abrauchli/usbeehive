@@ -1,20 +1,27 @@
 //! Text and JSON rendering for [`DeviceManager`].
 
+use std::collections::HashSet;
 use std::io::{self, Write};
 
 use serde_json::{json, Map, Value};
 use whatcable::pd::{cable_current_label, cable_speed_label};
 use whatcable::summary::{Category, DeviceSummary};
+use whatcable::usb::UsbDevice;
 use whatcable::usbclass;
 use whatcable::DeviceManager;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
+const ITALIC: &str = "\x1b[3m";
 const GREEN: &str = "\x1b[32m";
 const YELLOW: &str = "\x1b[33m";
 const BLUE: &str = "\x1b[34m";
 const CYAN: &str = "\x1b[36m";
+const MAGENTA: &str = "\x1b[35m";
+const BRIGHT_BLACK: &str = "\x1b[90m";
+const BRIGHT_BLUE: &str = "\x1b[94m";
+const BRIGHT_MAGENTA: &str = "\x1b[95m";
 
 /// Render the manager's current snapshot as colorized text.
 pub fn print_text<W: Write>(w: &mut W, mgr: &DeviceManager, show_raw: bool) -> io::Result<()> {
@@ -90,6 +97,192 @@ fn print_text_iter<W: Write>(
         writeln!(w)?;
     }
     Ok(())
+}
+
+/// Render the bus topology as a colorized tree.
+///
+/// Color encodes the upstream link speed of each node (see `speed_color`).
+/// Hubs render in italic. Type-C ports are listed above the tree.
+pub fn print_tree<W: Write>(w: &mut W, mgr: &DeviceManager) -> io::Result<()> {
+    let mut printed_anything = false;
+
+    for s in mgr.devices() {
+        if s.category == Category::TypeCPort {
+            print_typec_summary(w, s)?;
+            printed_anything = true;
+        }
+    }
+    if printed_anything {
+        writeln!(w)?;
+    }
+
+    let usb = mgr.usb_devices();
+    let roots = collect_tree_roots(usb);
+    if roots.is_empty() {
+        if !printed_anything {
+            return writeln!(w, "No USB devices found.");
+        }
+        return Ok(());
+    }
+
+    let mut last_was_root_block = false;
+    for root in roots {
+        if root.is_root_hub && root.children.is_empty() {
+            continue;
+        }
+        if last_was_root_block {
+            writeln!(w)?;
+        }
+        print_root(w, root)?;
+        last_was_root_block = true;
+    }
+
+    writeln!(w)?;
+    print_legend(w)
+}
+
+fn print_typec_summary<W: Write>(w: &mut W, dev: &DeviceSummary) -> io::Result<()> {
+    writeln!(w, "{BOLD}{CYAN}{}{RESET}", dev.headline)?;
+    if !dev.subtitle.is_empty() {
+        writeln!(w, "  {}", dev.subtitle)?;
+    }
+    for b in &dev.bullets {
+        writeln!(w, "  {DIM}• {RESET}{b}")?;
+    }
+    Ok(())
+}
+
+fn print_root<W: Write>(w: &mut W, dev: &UsbDevice) -> io::Result<()> {
+    let color = speed_color(dev.speed);
+    if dev.is_root_hub {
+        writeln!(
+            w,
+            "{color}● {}{RESET}  {DIM}{}{RESET}",
+            dev.bus_port,
+            root_label(dev)
+        )?;
+    } else {
+        let style = if dev.is_hub { ITALIC } else { "" };
+        writeln!(w, "{color}{style}{}{RESET}", dev.display_name())?;
+    }
+    let n = dev.children.len();
+    for (i, child) in dev.children.iter().enumerate() {
+        print_branch(w, child, "", i + 1 == n, dev)?;
+    }
+    Ok(())
+}
+
+fn print_branch<W: Write>(
+    w: &mut W,
+    dev: &UsbDevice,
+    prefix: &str,
+    last: bool,
+    parent: &UsbDevice,
+) -> io::Result<()> {
+    let connector = if last { "└─ " } else { "├─ " };
+    let color = speed_color(dev.speed);
+    let style = if dev.is_hub { ITALIC } else { "" };
+    let name = dev.display_name();
+
+    let mut hint = String::new();
+    if !dev.is_hub && name == parent.display_name() {
+        let cls = first_class_name(dev);
+        if !cls.is_empty() {
+            hint = format!("  {DIM}({cls}){RESET}");
+        }
+    }
+
+    writeln!(
+        w,
+        "{prefix}{color}{connector}{style}{name}{RESET}{hint}"
+    )?;
+
+    let next_prefix = format!("{prefix}{DIM}{}{RESET}", if last { "   " } else { "│  " });
+    let n = dev.children.len();
+    for (i, child) in dev.children.iter().enumerate() {
+        print_branch(w, child, &next_prefix, i + 1 == n, dev)?;
+    }
+    Ok(())
+}
+
+fn print_legend<W: Write>(w: &mut W) -> io::Result<()> {
+    writeln!(
+        w,
+        "{DIM}Link:{RESET}  \
+         {BRIGHT_MAGENTA}●{RESET} {DIM}40G{RESET}  \
+         {MAGENTA}●{RESET} {DIM}20G{RESET}  \
+         {BRIGHT_BLUE}●{RESET} {DIM}10G{RESET}  \
+         {CYAN}●{RESET} {DIM}5G{RESET}  \
+         {GREEN}●{RESET} {DIM}480M{RESET}  \
+         {YELLOW}●{RESET} {DIM}12M{RESET}  \
+         {BRIGHT_BLACK}●{RESET} {DIM}1.5M{RESET}   \
+         {DIM}{ITALIC}italic{RESET}{DIM} = hub{RESET}"
+    )
+}
+
+fn speed_color(mbps: u32) -> &'static str {
+    // Speeds <12 Mbps and unknown both bucket to gray. Some Low-Speed devices
+    // report `speed = "1.5"` which fails int parse and arrives here as 0.
+    match mbps {
+        s if s >= 40000 => BRIGHT_MAGENTA,
+        s if s >= 20000 => MAGENTA,
+        s if s >= 10000 => BRIGHT_BLUE,
+        s if s >= 5000 => CYAN,
+        s if s >= 480 => GREEN,
+        s if s >= 12 => YELLOW,
+        _ => BRIGHT_BLACK,
+    }
+}
+
+fn root_label(d: &UsbDevice) -> &'static str {
+    match d.speed {
+        s if s >= 40000 => "USB4 root",
+        s if s >= 20000 => "USB 3.2 root",
+        s if s >= 10000 => "USB 3.1 root",
+        s if s >= 5000 => "USB 3.0 root",
+        s if s >= 480 => "USB 2.0 root",
+        s if s >= 12 => "USB 1.1 root",
+        _ => "USB root",
+    }
+}
+
+fn first_class_name(dev: &UsbDevice) -> String {
+    if dev.device_class != 0 && dev.device_class != 0xFF {
+        return usbclass::class_name(dev.device_class);
+    }
+    for iface in &dev.interfaces {
+        let name = usbclass::class_name(iface.class_code);
+        if name == "Composite" || name.starts_with("0x") {
+            continue;
+        }
+        return name;
+    }
+    String::new()
+}
+
+/// A "tree root" is a device with no parent in `devs` — either a kernel
+/// root hub (`is_root_hub`) or an orphan whose parent isn't enumerated
+/// (e.g. a fixture-only device with no `usbN` entry).
+fn collect_tree_roots(devs: &[UsbDevice]) -> Vec<&UsbDevice> {
+    let names: HashSet<&str> = devs.iter().map(|d| d.bus_port.as_str()).collect();
+    devs.iter()
+        .filter(|d| {
+            if d.is_root_hub {
+                return true;
+            }
+            !names.contains(parent_bus_port(&d.bus_port).as_str())
+        })
+        .collect()
+}
+
+fn parent_bus_port(bp: &str) -> String {
+    if let Some((head, _)) = bp.rsplit_once('.') {
+        return head.to_string();
+    }
+    if let Some((bus, _)) = bp.split_once('-') {
+        return format!("usb{bus}");
+    }
+    String::new()
 }
 
 /// Render the manager's snapshot as pretty-printed JSON.
@@ -311,6 +504,72 @@ mod tests {
         let v = device_json(&s, false);
         assert_eq!(v["category"], "typec");
         assert_eq!(v["typec"]["dataRole"], "device");
+    }
+
+    #[test]
+    fn speed_color_buckets() {
+        assert_eq!(speed_color(0), BRIGHT_BLACK);
+        assert_eq!(speed_color(1), BRIGHT_BLACK);
+        assert_eq!(speed_color(12), YELLOW);
+        assert_eq!(speed_color(480), GREEN);
+        assert_eq!(speed_color(5_000), CYAN);
+        assert_eq!(speed_color(10_000), BRIGHT_BLUE);
+        assert_eq!(speed_color(20_000), MAGENTA);
+        assert_eq!(speed_color(40_000), BRIGHT_MAGENTA);
+    }
+
+    #[test]
+    fn root_label_picks_spec_for_speed() {
+        let mut d = UsbDevice {
+            speed: 480,
+            ..Default::default()
+        };
+        assert_eq!(root_label(&d), "USB 2.0 root");
+        d.speed = 10_000;
+        assert_eq!(root_label(&d), "USB 3.1 root");
+        d.speed = 40_000;
+        assert_eq!(root_label(&d), "USB4 root");
+    }
+
+    #[test]
+    fn parent_bus_port_resolves_levels() {
+        assert_eq!(parent_bus_port("5-2.4.1"), "5-2.4");
+        assert_eq!(parent_bus_port("1-1"), "usb1");
+        assert_eq!(parent_bus_port("usb5"), "");
+    }
+
+    #[test]
+    fn collect_tree_roots_includes_orphans_and_root_hubs() {
+        let root = UsbDevice {
+            bus_port: "usb1".into(),
+            is_root_hub: true,
+            ..Default::default()
+        };
+        let attached = UsbDevice {
+            bus_port: "1-1".into(),
+            ..Default::default()
+        };
+        let orphan = UsbDevice {
+            bus_port: "9-9".into(),
+            ..Default::default()
+        };
+        let devs = vec![root, attached, orphan];
+        let roots = collect_tree_roots(&devs);
+        let names: Vec<&str> = roots.iter().map(|d| d.bus_port.as_str()).collect();
+        assert!(names.contains(&"usb1"));
+        assert!(names.contains(&"9-9"));
+        assert!(!names.contains(&"1-1"));
+    }
+
+    #[test]
+    fn print_tree_legend_appears_when_devices_exist() {
+        use whatcable::DeviceManager;
+        use whatcable::Sysfs;
+        let mgr = DeviceManager::with_sysfs(Sysfs::with_root("/no/such/whatcable/path"));
+        let mut buf = Vec::new();
+        print_tree(&mut buf, &mgr).unwrap();
+        let out = String::from_utf8_lossy(&buf);
+        assert!(out.contains("No USB devices found."));
     }
 
     #[test]

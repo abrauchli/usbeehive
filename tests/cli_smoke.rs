@@ -84,11 +84,12 @@ fn empty_root_says_no_devices() {
 }
 
 #[test]
-fn keyboard_renders_in_text_mode() {
-    let root = TempRoot::new("kb-text");
+fn keyboard_renders_in_list_mode() {
+    let root = TempRoot::new("kb-list");
     write_keyboard_fixture(root.path());
 
     let out = cli()
+        .arg("--list")
         .arg("--sysfs-root")
         .arg(root.path())
         .output()
@@ -103,6 +104,28 @@ fn keyboard_renders_in_text_mode() {
     assert!(stdout.contains("Logitech"));
     assert!(stdout.contains("HID"));
     assert!(stdout.contains("VID:PID 046d:c31c"));
+}
+
+#[test]
+fn keyboard_renders_in_tree_mode() {
+    let root = TempRoot::new("kb-tree");
+    write_keyboard_fixture(root.path());
+
+    let out = cli()
+        .arg("--sysfs-root")
+        .arg(root.path())
+        .output()
+        .expect("binary runs");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("USB Keyboard"));
+    // Legend line confirms tree rendering ran.
+    assert!(stdout.contains("Link:"));
+    assert!(stdout.contains("480M"));
 }
 
 #[test]

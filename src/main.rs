@@ -8,7 +8,7 @@ use whatcable::{DeviceManager, Sysfs};
 
 mod output;
 
-use output::{print_json, print_text};
+use output::{print_json, print_text, print_tree};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -22,6 +22,14 @@ struct Cli {
     /// Structured JSON output.
     #[arg(long)]
     json: bool,
+
+    /// Render a flat list with full per-device details (default is a topology tree).
+    #[arg(long, conflicts_with = "tree")]
+    list: bool,
+
+    /// Render the bus topology as a tree (default).
+    #[arg(long, conflicts_with = "list")]
+    tree: bool,
 
     /// Stream updates as devices change (requires the `watch` feature).
     #[arg(long)]
@@ -44,9 +52,10 @@ fn main() -> io::Result<()> {
     };
     let mut mgr = DeviceManager::with_sysfs(sysfs);
 
+    let use_list = cli.list;
     if cli.watch {
         #[cfg(feature = "watch")]
-        return run_watch(&mut mgr, cli.json, cli.raw);
+        return run_watch(&mut mgr, cli.json, use_list, cli.raw);
         #[cfg(not(feature = "watch"))]
         {
             eprintln!("--watch is not available: built without the `watch` feature.");
@@ -58,13 +67,20 @@ fn main() -> io::Result<()> {
     let mut out = stdout.lock();
     if cli.json {
         print_json(&mut out, &mgr, cli.raw)
-    } else {
+    } else if use_list {
         print_text(&mut out, &mgr, cli.raw)
+    } else {
+        print_tree(&mut out, &mgr)
     }
 }
 
 #[cfg(feature = "watch")]
-fn run_watch(mgr: &mut DeviceManager, use_json: bool, show_raw: bool) -> io::Result<()> {
+fn run_watch(
+    mgr: &mut DeviceManager,
+    use_json: bool,
+    use_list: bool,
+    show_raw: bool,
+) -> io::Result<()> {
     use std::time::Duration;
     use whatcable::watch::{run_loop, RefreshReason};
 
@@ -78,7 +94,11 @@ fn run_watch(mgr: &mut DeviceManager, use_json: bool, show_raw: bool) -> io::Res
             if matches!(reason, RefreshReason::Hotplug | RefreshReason::Initial) {
                 write!(out, "\x1b[2J\x1b[H")?;
             }
-            print_text(&mut out, mgr, show_raw)?;
+            if use_list {
+                print_text(&mut out, mgr, show_raw)?;
+            } else {
+                print_tree(&mut out, mgr)?;
+            }
         } else {
             print_json(&mut out, mgr, show_raw)?;
         }
