@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-08
+
+Topology + link-speed surface: the USB tree view is now the default CLI
+output, and the helpers that drive it are public on the library.
+
+### Added
+
+- **Tree topology view as the new default CLI output.** Renders the USB
+  bus with `├─ └─` branches; each device is colored by its upstream link
+  speed (gray → magenta, Low Speed through USB4) so bottlenecks are
+  visible at a glance without per-line speed labels. Includes a legend
+  at the bottom and italic styling for hubs. Empty root hubs are hidden;
+  orphan devices (no enumerated parent, e.g. fixture-only) are still
+  rendered as top-level roots.
+- `--list` flag — restores the previous flat per-device view.
+- `--tree` flag — explicit form of the new default.
+- **`UsbDevice::parent_bus_port() -> Option<String>`** — sysfs
+  identifier of the parent device, `None` for kernel root hubs.
+- **`usb::tree_roots(&[UsbDevice]) -> Vec<&UsbDevice>`** — devices with
+  no parent in the slice (root hubs + orphans), the entry points for a
+  topology walk over `UsbDevice::children`.
+- **`LinkSpeed` enum + `link_speed_tier(u32) -> LinkSpeed` +
+  `UsbDevice::link_speed_tier()`** — a stable, switchable tier instead
+  of raw Mbps thresholds. Adds a 40 Gbps USB4 tier the previous
+  bucketing collapsed into "USB4 20 Gbps".
+
+### Changed
+
+- `speed_label(u32)` is now `link_speed_tier(speed).label()`. Existing
+  labels (and their tests) are preserved verbatim.
+- `src/sysfs/usb.rs::build_topology` and `src/output.rs` (tree renderer)
+  drop their private parent-resolution / root-collection helpers in
+  favor of the public API.
+
 ## [0.3.1] - 2026-05-02
 
 Metadata-only patch release.
@@ -113,6 +147,7 @@ For library consumers:
 - Cast signal handler through `*const ()` for clippy fn-to-int lint.
 - Re-enable `watch` feature by default.
 
+[0.4.0]: https://github.com/abrauchli/whatcable/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/abrauchli/whatcable/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/abrauchli/whatcable/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/abrauchli/whatcable/releases/tag/v0.2.1
