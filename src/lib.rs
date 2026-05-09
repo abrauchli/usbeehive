@@ -74,7 +74,10 @@ pub use usb::{LinkSpeed, UsbDevice, UsbInterface};
 #[cfg(feature = "sysfs")]
 pub use sysfs::{
     error::{Error, Result},
-    manager::{build_summaries, DeviceManager, Snapshot},
+    manager::{build_summaries, DeviceManager, Snapshot, SnapshotDiff},
     reader::Sysfs,
     typec::ucsi_controller,
 };
+
+#[cfg(feature = "dbus")]
+pub mod dbus;

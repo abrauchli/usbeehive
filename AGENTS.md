@@ -32,13 +32,16 @@ whatcable/
 │   │   ├── usb.rs / typec.rs / power.rs # impl Sysfs::*
 │   │   ├── manager.rs                  # DeviceManager + Snapshot
 │   │   └── error.rs                    # Error / Result
-│   └── watch.rs                        ← #[cfg(feature = "watch")]
+│   ├── watch.rs                        ← #[cfg(feature = "watch")]
+│   ├── dbus.rs                         ← #[cfg(feature = "dbus")]
+│   └── bin/whatcabled.rs               # D-Bus daemon  ← gated on `dbus`
 ├── tests/
 │   ├── fixture_builder.rs              # programmatic sysfs-tree builder
 │   ├── usb_enumeration.rs              # gated on `sysfs`
 │   ├── typec_pd_scenarios.rs           # gated on `sysfs`
-│   └── cli_smoke.rs                    # gated on `cli`
-├── examples/{decode_cable_vdo,cable_info,list_devices,snapshot_diff,print_changes}.rs
+│   ├── cli_smoke.rs                    # gated on `cli`
+│   └── dbus_interface.rs               # gated on `dbus`
+├── examples/{decode_cable_vdo,cable_info,list_devices,snapshot_diff,print_changes,dbus_client}.rs
 ├── CHANGELOG.md / README.md / AGENTS.md
 └── .github/workflows/{ci,release}.yml
 ```
@@ -51,9 +54,11 @@ whatcable/
 | `sysfs` | yes | `std::fs` | `/sys` enumeration, `Sysfs`, `DeviceManager` |
 | `watch` | yes | `udev`, `libc` | libudev hotplug (`Watcher`, `run_loop`) — implies `sysfs` |
 | `cli` | yes | `clap`, `serde_json` | `whatcable` binary — implies `sysfs` |
+| `dbus` | no | `zbus`, `serde_json` | `whatcable::dbus` module + `whatcabled` daemon publishing `org.whatcable.Devices1` — implies `watch` |
 
-`watch` and `cli` both transitively enable `sysfs`. Pure-decoder consumers
-go `default-features = false` and get a `serde`-only build.
+`watch` and `cli` both transitively enable `sysfs`; `dbus` enables `watch`
+(and therefore `sysfs`). Pure-decoder consumers go
+`default-features = false` and get a `serde`-only build.
 
 ## Code conventions
 
@@ -117,6 +122,8 @@ Manual smoke tests:
 | `src/sysfs/reader.rs` | `Sysfs` handle + `read_attr` / `read_int` / `read_hex` |
 | `src/sysfs/manager.rs` | `DeviceManager` + `Snapshot` |
 | `src/watch.rs` | `Watcher` + `run_loop` |
+| `src/dbus.rs` | `org.whatcable.Devices1` interface + `DeviceEntry` / `DiagnosticEntry` wire types |
+| `src/bin/whatcabled.rs` | D-Bus daemon entrypoint (zbus + hot-plug thread) |
 | `src/output.rs` | CLI text + JSON rendering |
 | `src/main.rs` | CLI parser + dispatch |
 | `tests/fixture_builder.rs` | Programmatic sysfs-tree builder |

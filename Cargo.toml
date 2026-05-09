@@ -21,12 +21,18 @@ name = "whatcable"
 path = "src/main.rs"
 required-features = ["cli"]
 
+[[bin]]
+name = "whatcabled"
+path = "src/bin/whatcabled.rs"
+required-features = ["dbus"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", optional = true }
 clap = { version = "4", features = ["derive"], optional = true }
 udev = { version = "0.9", optional = true }
 libc = { version = "0.2", optional = true }
+zbus = { version = "5", optional = true }
 
 [dev-dependencies]
 serde_json = "1"
@@ -40,6 +46,10 @@ sysfs = []
 watch = ["dep:udev", "dep:libc", "sysfs"]
 # `cli` enables the `whatcable` binary.
 cli = ["dep:serde_json", "dep:clap", "sysfs"]
+# `dbus` enables the `whatcable::dbus` interface module and the `whatcabled`
+# binary that exposes `org.whatcable.Devices1` on the session bus. Implies
+# `watch` (and therefore `sysfs`) so the daemon has a live snapshot.
+dbus = ["dep:zbus", "dep:serde_json", "watch"]
 
 [[example]]
 name = "list_devices"
@@ -52,6 +62,10 @@ required-features = ["sysfs"]
 [[example]]
 name = "print_changes"
 required-features = ["watch"]
+
+[[example]]
+name = "dbus_client"
+required-features = ["dbus"]
 
 [lints.rust]
 missing_docs = "warn"

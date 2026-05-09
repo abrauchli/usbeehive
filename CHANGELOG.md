@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Optional D-Bus interface (`dbus` feature).** New `whatcable::dbus`
+  module exposing `org.whatcable.Devices1` (object path
+  `/org/whatcable/Devices`) with `ListDevices`, `ListPorts`, `Diagnose`,
+  `SnapshotJson`, `Refresh` methods, `Version` / `DeviceCount`
+  properties, and `DeviceAdded` / `DeviceRemoved` /
+  `CapabilityDegraded` / `CapabilityRestored` signals. Disabled by
+  default — pulls in `zbus` only when requested.
+- **`whatcabled` daemon binary** (built with `--features dbus`). Runs
+  the libudev hot-plug loop in a background thread and emits D-Bus
+  signals as the snapshot changes. Suppresses signals on the initial
+  baseline refresh so already-plugged devices don't re-fire as fresh
+  events.
+- **`Snapshot::diff(&Snapshot) -> SnapshotDiff`** — added/removed
+  device ids plus newly-degraded / resolved Type-C port numbers. Backs
+  the daemon's signal classification but is independently useful to
+  library consumers.
+- **`DeviceSummary::id() -> String`** — stable
+  `"typec:<port_name>"` / `"usb:<bus_port>"` identifier, used as the
+  diff key.
+- `examples/dbus_client.rs` — minimal `zbus` client that lists devices
+  and queries port 0's diagnostic.
+
 ## [0.4.0] - 2026-05-08
 
 Topology + link-speed surface: the USB tree view is now the default CLI

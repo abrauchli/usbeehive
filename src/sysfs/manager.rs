@@ -22,6 +22,94 @@ pub struct Snapshot {
     pub summaries: Vec<DeviceSummary>,
 }
 
+/// What changed between two [`Snapshot`]s.
+///
+/// Computed by [`Snapshot::diff`]. Identifiers come from
+/// [`DeviceSummary::id`] (`"typec:port0"`, `"usb:1-1.4"`, …). The
+/// `*_degraded` and `*_resolved` lists carry Type-C port numbers — those
+/// are the only summaries that can carry a [`crate::ChargingDiagnostic`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SnapshotDiff {
+    /// Summary ids that exist in `self` but not in the previous snapshot.
+    pub added: Vec<String>,
+    /// Summary ids that existed in the previous snapshot but are gone.
+    pub removed: Vec<String>,
+    /// Type-C port numbers whose charging diagnostic newly raised
+    /// `is_warning` (or whose charger first appeared with a warning).
+    pub newly_degraded: Vec<i32>,
+    /// Type-C port numbers whose previously-warning diagnostic has cleared
+    /// (e.g. user swapped the cable for a properly-rated one).
+    pub resolved: Vec<i32>,
+}
+
+impl SnapshotDiff {
+    /// `true` when no entries appeared, disappeared, or changed.
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty()
+            && self.removed.is_empty()
+            && self.newly_degraded.is_empty()
+            && self.resolved.is_empty()
+    }
+}
+
+impl Snapshot {
+    /// Compute the difference of `self` relative to `previous`.
+    ///
+    /// "Added" / "removed" use [`DeviceSummary::id`]; "degraded" / "resolved"
+    /// use Type-C `port_number`. Warnings carried by ports that already
+    /// existed in `previous` are only re-reported when their `is_warning`
+    /// flag flipped.
+    pub fn diff(&self, previous: &Snapshot) -> SnapshotDiff {
+        use std::collections::{HashMap, HashSet};
+
+        let prev_ids: HashSet<String> = previous.summaries.iter().map(|s| s.id()).collect();
+        let cur_ids: HashSet<String> = self.summaries.iter().map(|s| s.id()).collect();
+
+        let added: Vec<String> = self
+            .summaries
+            .iter()
+            .map(|s| s.id())
+            .filter(|id| !prev_ids.contains(id))
+            .collect();
+        let removed: Vec<String> = previous
+            .summaries
+            .iter()
+            .map(|s| s.id())
+            .filter(|id| !cur_ids.contains(id))
+            .collect();
+
+        // Map port_number → was_warning for the previous snapshot.
+        let mut prev_warn: HashMap<i32, bool> = HashMap::new();
+        for s in &previous.summaries {
+            if let Some(tc) = &s.typec_port {
+                let is_warn = s.charging_diag.as_ref().is_some_and(|d| d.is_warning);
+                prev_warn.insert(tc.port_number, is_warn);
+            }
+        }
+
+        let mut newly_degraded = Vec::new();
+        let mut resolved = Vec::new();
+        for s in &self.summaries {
+            let Some(tc) = &s.typec_port else {
+                continue;
+            };
+            let now_warn = s.charging_diag.as_ref().is_some_and(|d| d.is_warning);
+            match prev_warn.get(&tc.port_number).copied() {
+                Some(true) if !now_warn => resolved.push(tc.port_number),
+                Some(false) | None if now_warn => newly_degraded.push(tc.port_number),
+                _ => {}
+            }
+        }
+
+        SnapshotDiff {
+            added,
+            removed,
+            newly_degraded,
+            resolved,
+        }
+    }
+}
+
 /// Stateful enumerator that keeps the latest [`Snapshot`] in memory.
 ///
 /// ```no_run
@@ -211,6 +299,118 @@ mod tests {
         let summaries = build_summaries(&[], &[p0, p1], &[pd_for_p1]);
         assert!(summaries[0].power_delivery.is_none());
         assert!(summaries[1].power_delivery.is_some());
+    }
+
+    #[test]
+    fn snapshot_diff_detects_added_and_removed_summaries() {
+        let usb_a = UsbDevice {
+            bus_port: "1-1".into(),
+            product: "thing-a".into(),
+            ..Default::default()
+        };
+        let usb_b = UsbDevice {
+            bus_port: "1-2".into(),
+            product: "thing-b".into(),
+            ..Default::default()
+        };
+        let prev = Snapshot {
+            summaries: build_summaries(&[usb_a.clone()], &[], &[]),
+            ..Default::default()
+        };
+        let cur = Snapshot {
+            summaries: build_summaries(&[usb_b.clone()], &[], &[]),
+            ..Default::default()
+        };
+        let diff = cur.diff(&prev);
+        assert_eq!(diff.added, vec!["usb:1-2"]);
+        assert_eq!(diff.removed, vec!["usb:1-1"]);
+        assert!(diff.newly_degraded.is_empty());
+        assert!(diff.resolved.is_empty());
+        assert!(!diff.is_empty());
+    }
+
+    #[test]
+    fn snapshot_diff_flags_newly_degraded_typec_port() {
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner::default()),
+            ..Default::default()
+        };
+        let charger = PowerDeliveryPort {
+            parent_port_number: 0,
+            source_capabilities: vec![PowerDataObject {
+                power_mw: 100_000,
+                ..Default::default()
+            }],
+            max_source_power_mw: 100_000,
+            ..Default::default()
+        };
+
+        // Previous: same port, no charger → no diagnostic.
+        let prev = Snapshot {
+            summaries: build_summaries(&[], &[port.clone()], &[]),
+            ..Default::default()
+        };
+        // Current: charger plugged in, but the cable is rated only 60W.
+        let mut summaries = build_summaries(&[], &[port.clone()], &[charger.clone()]);
+        // Inject a CableLimit warning so we don't depend on the cable decoder
+        // for this assertion.
+        summaries[0].charging_diag = Some(crate::diagnostic::ChargingDiagnostic {
+            bottleneck: crate::diagnostic::Bottleneck::CableLimit,
+            summary: "Cable is limiting charging speed".into(),
+            detail: "Cable rated for 60W, but charger can deliver 100W".into(),
+            is_warning: true,
+        });
+        let cur = Snapshot {
+            summaries,
+            ..Default::default()
+        };
+        let diff = cur.diff(&prev);
+        assert_eq!(diff.newly_degraded, vec![0]);
+        assert!(diff.resolved.is_empty());
+    }
+
+    #[test]
+    fn snapshot_diff_flags_resolved_when_warning_clears() {
+        let port = TypeCPort {
+            port_number: 1,
+            partner: Some(TypeCPartner::default()),
+            ..Default::default()
+        };
+        let mut prev_summaries = build_summaries(&[], &[port.clone()], &[]);
+        prev_summaries[0].charging_diag = Some(crate::diagnostic::ChargingDiagnostic {
+            bottleneck: crate::diagnostic::Bottleneck::CableLimit,
+            summary: "Cable is limiting charging speed".into(),
+            detail: "".into(),
+            is_warning: true,
+        });
+        let prev = Snapshot {
+            summaries: prev_summaries,
+            ..Default::default()
+        };
+        // Current: same port, no warning anymore.
+        let cur = Snapshot {
+            summaries: build_summaries(&[], &[port.clone()], &[]),
+            ..Default::default()
+        };
+        let diff = cur.diff(&prev);
+        assert_eq!(diff.resolved, vec![1]);
+        assert!(diff.newly_degraded.is_empty());
+    }
+
+    #[test]
+    fn snapshot_diff_empty_when_unchanged() {
+        let usb = UsbDevice {
+            bus_port: "1-1".into(),
+            product: "thing".into(),
+            ..Default::default()
+        };
+        let snap = Snapshot {
+            summaries: build_summaries(&[usb], &[], &[]),
+            ..Default::default()
+        };
+        let diff = snap.diff(&snap.clone());
+        assert!(diff.is_empty(), "{diff:?}");
     }
 
     #[test]

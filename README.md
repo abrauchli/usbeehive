@@ -93,6 +93,7 @@ consumers pull in only what they need.
 | `sysfs` | yes | `Sysfs` handle + `DeviceManager` — Linux `/sys` enumeration with injectable root. |
 | `watch` | yes | libudev hotplug monitor: `watch::Watcher` + `watch::run_loop`. |
 | `cli` | yes | The `whatcable` binary (clap + JSON / text rendering). |
+| `dbus` | no | `whatcable::dbus` interface module + the `whatcabled` daemon binary publishing `org.whatcable.Devices1` on the session bus (implies `watch`). |
 
 Library-only consumers can drop the binary deps:
 
@@ -145,6 +146,42 @@ run_loop(Duration::from_millis(500), |_reason| {
 ```
 
 See [`examples/`](examples) for more.
+
+## D-Bus daemon (optional)
+
+Build with the `dbus` feature to get a long-running daemon, `whatcabled`,
+that publishes the live snapshot on the session bus. Useful for desktop
+applets (KDE / GNOME / tray apps) that want to react to cable plugs and
+charging-bottleneck changes without each one re-implementing sysfs
+enumeration.
+
+```bash
+cargo build --release --no-default-features --features dbus
+./target/release/whatcabled                                # foreground
+```
+
+Wire surface — `org.whatcable.Devices1` at `/org/whatcable/Devices`:
+
+| Member | Kind | Notes |
+|---|---|---|
+| `ListDevices` | method `() → a(...)` | One entry per summary (id, headline, bullets, icon, …). |
+| `ListPorts` | method `() → ai` | Type-C `port_number`s currently exposed. |
+| `Diagnose` | method `(i) → (...)` | Charging diagnostic for a port (`bottleneck`, `summary`, `is_warning`). |
+| `SnapshotJson` | method `() → s` | Full structured snapshot — same shape as `whatcable --json`. |
+| `Refresh` | method `() → u` | Force a re-enumeration; returns the new device count. |
+| `Version` / `DeviceCount` | properties | Crate version + summary count. |
+| `DeviceAdded` / `DeviceRemoved` | signals | Fire when a device or port appears / disappears. |
+| `CapabilityDegraded` / `CapabilityRestored` | signals | Fire when a port's charging diagnostic newly raises (or clears) `is_warning` — e.g. a too-thin cable plugged into a beefy charger. |
+
+Quick poke from the shell:
+
+```sh
+gdbus call --session --dest org.whatcable.Devices \
+    --object-path /org/whatcable/Devices \
+    --method org.whatcable.Devices1.ListDevices
+```
+
+A minimal Rust client lives in [`examples/dbus_client.rs`](examples/dbus_client.rs).
 
 ## How it works
 

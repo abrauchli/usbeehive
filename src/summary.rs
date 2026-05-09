@@ -99,6 +99,21 @@ fn icon_for(device_type: &str, is_hub: bool) -> &'static str {
 }
 
 impl DeviceSummary {
+    /// Stable identifier suitable for diffing two snapshots.
+    ///
+    /// Returns `"typec:<port_name>"` for Type-C ports and `"usb:<bus_port>"`
+    /// for USB devices. Empty when the summary has no underlying device
+    /// reference (should not happen via the public constructors).
+    pub fn id(&self) -> String {
+        if let Some(p) = &self.typec_port {
+            format!("typec:{}", p.port_name)
+        } else if let Some(d) = &self.usb_device {
+            format!("usb:{}", d.bus_port)
+        } else {
+            String::new()
+        }
+    }
+
     /// Build a summary for a [`UsbDevice`].
     pub fn from_usb_device(dev: &UsbDevice) -> DeviceSummary {
         let vendor_name = vendor::lookup(dev.vendor_id);
