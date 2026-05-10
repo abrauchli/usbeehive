@@ -2,14 +2,14 @@
 //! subsystems emit a change.
 //!
 //! ```sh
-//! cargo run -p whatcable-watch --example print_changes
+//! cargo run -p usbeehive-watch --example print_changes
 //! ```
 //!
 //! Plug or unplug a USB device to trigger output. Press `Ctrl-C` to exit.
 
 use std::time::{Duration, Instant};
 
-use whatcable::watch::{run_loop, RefreshReason};
+use usbeehive::watch::{run_loop, RefreshReason};
 
 fn main() {
     let started = Instant::now();

@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn enumerate_missing_dir_returns_empty() {
-        let result = enumerate_in(Path::new("/no/such/whatcable/path"));
+        let result = enumerate_in(Path::new("/no/such/usbeehive/path"));
         assert!(result.is_empty());
     }
 }

@@ -3,12 +3,12 @@
 //! against a fixture tree.
 //!
 //! ```sh
-//! cargo run -p whatcable-sysfs --example snapshot_diff -- /tmp/before /tmp/after
+//! cargo run -p usbeehive-sysfs --example snapshot_diff -- /tmp/before /tmp/after
 //! ```
 
 use std::collections::HashSet;
 
-use whatcable::{DeviceManager, Sysfs};
+use usbeehive::{DeviceManager, Sysfs};
 
 fn collect(root: &str) -> Vec<(String, String)> {
     let mut mgr = DeviceManager::with_sysfs(Sysfs::with_root(root));

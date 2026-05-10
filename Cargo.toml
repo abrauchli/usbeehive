@@ -1,29 +1,29 @@
 [package]
-name = "whatcable"
-version = "0.4.0"
+name = "usbeehive"
+version = "0.5.0"
 edition = "2021"
 license = "MIT"
 authors = ["Andreas Brauchli"]
-description = "Tells you what each USB cable / device on Linux can actually do. Rust port of WhatCable."
-repository = "https://github.com/abrauchli/whatcable"
-homepage = "https://github.com/abrauchli/whatcable"
+description = "Tells you what each USB cable / device on Linux can actually do. Rust port of WhatCable; previously published as `whatcable`."
+repository = "https://github.com/abrauchli/usbeehive"
+homepage = "https://github.com/abrauchli/usbeehive"
 readme = "README.md"
 rust-version = "1.85"
 keywords = ["usb", "usb-c", "power-delivery", "sysfs", "cli"]
 categories = ["command-line-utilities", "hardware-support", "os::linux-apis"]
 
 [lib]
-name = "whatcable"
+name = "usbeehive"
 path = "src/lib.rs"
 
 [[bin]]
-name = "whatcable"
+name = "usbeehive"
 path = "src/main.rs"
 required-features = ["cli"]
 
 [[bin]]
-name = "whatcabled"
-path = "src/bin/whatcabled.rs"
+name = "usbeehived"
+path = "src/bin/usbeehived.rs"
 required-features = ["dbus"]
 
 [dependencies]
@@ -44,10 +44,10 @@ default = ["cli", "sysfs", "watch"]
 sysfs = []
 # `watch` enables the libudev hotplug monitor (Watcher, run_loop).
 watch = ["dep:udev", "dep:libc", "sysfs"]
-# `cli` enables the `whatcable` binary.
+# `cli` enables the `usbeehive` binary.
 cli = ["dep:serde_json", "dep:clap", "sysfs"]
-# `dbus` enables the `whatcable::dbus` interface module and the `whatcabled`
-# binary that exposes `org.whatcable.Devices1` on the session bus. Implies
+# `dbus` enables the `usbeehive::dbus` interface module and the `usbeehived`
+# binary that exposes `org.usbeehive.Devices1` on the session bus. Implies
 # `watch` (and therefore `sysfs`) so the daemon has a live snapshot.
 dbus = ["dep:zbus", "dep:serde_json", "watch"]
 

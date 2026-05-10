@@ -3,11 +3,11 @@
 use std::io::{self, Write};
 
 use serde_json::{json, Map, Value};
-use whatcable::pd::{cable_current_label, cable_speed_label};
-use whatcable::summary::{Category, DeviceSummary};
-use whatcable::usb::{tree_roots, UsbDevice};
-use whatcable::usbclass;
-use whatcable::{DeviceManager, LinkSpeed};
+use usbeehive::pd::{cable_current_label, cable_speed_label};
+use usbeehive::summary::{Category, DeviceSummary};
+use usbeehive::usb::{tree_roots, UsbDevice};
+use usbeehive::usbclass;
+use usbeehive::{DeviceManager, LinkSpeed};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -435,8 +435,8 @@ pub(crate) fn device_json(dev: &DeviceSummary, show_raw: bool) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use whatcable::summary::Status;
-    use whatcable::usb::UsbDevice;
+    use usbeehive::summary::Status;
+    use usbeehive::usb::UsbDevice;
 
     #[test]
     fn empty_text_says_no_devices() {
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn typec_summary_serializes() {
-        let port = whatcable::typec::TypeCPort {
+        let port = usbeehive::typec::TypeCPort {
             port_number: 0,
             data_role: "host [device]".into(),
             ..Default::default()
@@ -507,9 +507,9 @@ mod tests {
 
     #[test]
     fn print_tree_legend_appears_when_devices_exist() {
-        use whatcable::DeviceManager;
-        use whatcable::Sysfs;
-        let mgr = DeviceManager::with_sysfs(Sysfs::with_root("/no/such/whatcable/path"));
+        use usbeehive::DeviceManager;
+        use usbeehive::Sysfs;
+        let mgr = DeviceManager::with_sysfs(Sysfs::with_root("/no/such/usbeehive/path"));
         let mut buf = Vec::new();
         print_tree(&mut buf, &mgr).unwrap();
         let out = String::from_utf8_lossy(&buf);
@@ -518,8 +518,8 @@ mod tests {
 
     #[test]
     fn text_output_renders_charger_profiles() {
-        use whatcable::power::{PdoType, PowerDataObject, PowerDeliveryPort};
-        use whatcable::typec::{TypeCPartner, TypeCPort};
+        use usbeehive::power::{PdoType, PowerDataObject, PowerDeliveryPort};
+        use usbeehive::typec::{TypeCPartner, TypeCPort};
         let port = TypeCPort {
             port_number: 0,
             partner: Some(TypeCPartner::default()),

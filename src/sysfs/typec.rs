@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn missing_typec_dir_returns_empty() {
-        let result = enumerate_in(Path::new("/no/such/whatcable/path"), Path::new("/no/such"));
+        let result = enumerate_in(Path::new("/no/such/usbeehive/path"), Path::new("/no/such"));
         assert!(result.is_empty());
     }
 }

@@ -4,11 +4,11 @@
 //! tree) as the first argument:
 //!
 //! ```sh
-//! cargo run -p whatcable-sysfs --example list_devices
-//! cargo run -p whatcable-sysfs --example list_devices -- /tmp/my-fixture
+//! cargo run -p usbeehive-sysfs --example list_devices
+//! cargo run -p usbeehive-sysfs --example list_devices -- /tmp/my-fixture
 //! ```
 
-use whatcable::{DeviceManager, Sysfs};
+use usbeehive::{DeviceManager, Sysfs};
 
 fn main() {
     let sysfs = match std::env::args().nth(1) {

@@ -1,7 +1,7 @@
 //! USB Type-C port data model.
 //!
 //! Plain-data types corresponding to entries under `/sys/class/typec/`.
-//! Enumeration lives in `whatcable-sysfs`.
+//! Enumeration lives in `usbeehive-sysfs`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

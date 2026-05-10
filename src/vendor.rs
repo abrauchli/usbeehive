@@ -8,7 +8,7 @@
 /// `"0x...."` hex string if the VID isn't in the bundled table.
 ///
 /// ```
-/// use whatcable::vendor::lookup;
+/// use usbeehive::vendor::lookup;
 /// assert_eq!(lookup(0x05AC), "Apple");
 /// assert_eq!(lookup(0xDEAD), "0xdead");
 /// ```

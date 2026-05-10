@@ -1,10 +1,10 @@
-//! WhatCable CLI entry point.
+//! usbeehive CLI entry point.
 
 use std::io::{self, Write};
 
 use clap::Parser;
 
-use whatcable::{DeviceManager, Sysfs};
+use usbeehive::{DeviceManager, Sysfs};
 
 mod output;
 
@@ -12,10 +12,10 @@ use output::{print_json, print_text, print_tree};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "whatcable",
+    name = "usbeehive",
     version,
     about = "Tells you what each USB cable / device on Linux can actually do.",
-    long_about = "WhatCable — shows what each USB cable / device can do.\n\
+    long_about = "usbeehive — shows what each USB cable / device can do.\n\
                   Port of WhatCable (macOS) by Darryl Morley."
 )]
 struct Cli {
@@ -82,7 +82,7 @@ fn run_watch(
     show_raw: bool,
 ) -> io::Result<()> {
     use std::time::Duration;
-    use whatcable::watch::{run_loop, RefreshReason};
+    use usbeehive::watch::{run_loop, RefreshReason};
 
     run_loop(Duration::from_millis(500), |reason| {
         mgr.refresh();

@@ -1,7 +1,7 @@
-//! `whatcabled` — D-Bus daemon exposing the WhatCable snapshot.
+//! `usbeehived` — D-Bus daemon exposing the usbeehive snapshot.
 //!
-//! Hosts `org.whatcable.Devices1` on the session bus (see
-//! [`whatcable::dbus`]). A background thread runs the libudev hot-plug
+//! Hosts `org.usbeehive.Devices1` on the session bus (see
+//! [`usbeehive::dbus`]). A background thread runs the libudev hot-plug
 //! loop, refreshes the [`DeviceManager`] under a mutex, and emits
 //! `DeviceAdded` / `DeviceRemoved` / `CapabilityDegraded` /
 //! `CapabilityRestored` signals as the snapshot changes.
@@ -9,10 +9,10 @@
 //! Run with `RUST_LOG=info` for connect/disconnect tracing on stderr.
 //!
 //! ```sh
-//! cargo run --no-default-features --features dbus --bin whatcabled
-//! gdbus call --session --dest org.whatcable.Devices \
-//!     --object-path /org/whatcable/Devices \
-//!     --method org.whatcable.Devices1.ListDevices
+//! cargo run --no-default-features --features dbus --bin usbeehived
+//! gdbus call --session --dest org.usbeehive.Devices \
+//!     --object-path /org/usbeehive/Devices \
+//!     --method org.usbeehive.Devices1.ListDevices
 //! ```
 
 use std::io::{self, Write};
@@ -20,15 +20,15 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use whatcable::dbus::{DevicesIface, State, BUS_NAME, OBJECT_PATH};
-use whatcable::watch::{run_loop, RefreshReason};
-use whatcable::DeviceManager;
+use usbeehive::dbus::{DevicesIface, State, BUS_NAME, OBJECT_PATH};
+use usbeehive::watch::{run_loop, RefreshReason};
+use usbeehive::DeviceManager;
 
 use zbus::block_on;
 use zbus::blocking::connection;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("whatcabled {}: starting…", env!("CARGO_PKG_VERSION"));
+    eprintln!("usbeehived {}: starting…", env!("CARGO_PKG_VERSION"));
 
     // Manager + state are shared between dispatch thread (zbus) and the
     // background hot-plug thread.
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     eprintln!(
-        "whatcabled: registered {} at {} on the session bus",
+        "usbeehived: registered {} at {} on the session bus",
         BUS_NAME, OBJECT_PATH
     );
 
@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Snapshot diff under the lock, but don't hold it while we hop
             // into D-Bus signal emission.
             let (diff, headline_lookup): (
-                whatcable::SnapshotDiff,
+                usbeehive::SnapshotDiff,
                 Vec<(String, String)>,
             ) = {
                 let mut guard = watcher_state.lock().expect("state mutex poisoned");
@@ -83,22 +83,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         });
         if let Err(e) = result {
-            eprintln!("whatcabled: hot-plug loop exited: {e}");
+            eprintln!("usbeehived: hot-plug loop exited: {e}");
         }
         let _ = quit_tx.send(());
     });
 
     // Block here until the hot-plug thread bows out (SIGINT/SIGTERM via
-    // `whatcable::watch::install_default_signal_handlers`, or unrecoverable
+    // `usbeehive::watch::install_default_signal_handlers`, or unrecoverable
     // libudev error).
     let _ = quit_rx.recv();
-    eprintln!("whatcabled: shutting down");
+    eprintln!("usbeehived: shutting down");
     Ok(())
 }
 
 fn emit_signals(
     connection: &zbus::blocking::Connection,
-    diff: &whatcable::SnapshotDiff,
+    diff: &usbeehive::SnapshotDiff,
     added_headlines: &[(String, String)],
     state: &Arc<Mutex<State>>,
 ) {
@@ -106,27 +106,27 @@ fn emit_signals(
     let iface_ref = match object_server.interface::<_, DevicesIface>(OBJECT_PATH) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("whatcabled: cannot resolve interface for signals: {e}");
+            eprintln!("usbeehived: cannot resolve interface for signals: {e}");
             return;
         }
     };
     let emitter = iface_ref.signal_emitter();
 
     for (id, headline) in added_headlines {
-        eprintln!("whatcabled: + {id} ({headline})");
+        eprintln!("usbeehived: + {id} ({headline})");
         if let Err(e) = block_on(DevicesIface::device_added(
             emitter,
             id.clone(),
             headline.clone(),
         )) {
-            eprintln!("whatcabled: device_added emit failed: {e}");
+            eprintln!("usbeehived: device_added emit failed: {e}");
         }
     }
 
     for id in &diff.removed {
-        eprintln!("whatcabled: - {id}");
+        eprintln!("usbeehived: - {id}");
         if let Err(e) = block_on(DevicesIface::device_removed(emitter, id.clone())) {
-            eprintln!("whatcabled: device_removed emit failed: {e}");
+            eprintln!("usbeehived: device_removed emit failed: {e}");
         }
     }
 
@@ -151,18 +151,18 @@ fn emit_signals(
                 })
                 .unwrap_or_default()
         };
-        eprintln!("whatcabled: ! port {port} degraded — {summary}");
+        eprintln!("usbeehived: ! port {port} degraded — {summary}");
         if let Err(e) = block_on(DevicesIface::capability_degraded(
             emitter, port, summary, detail,
         )) {
-            eprintln!("whatcabled: capability_degraded emit failed: {e}");
+            eprintln!("usbeehived: capability_degraded emit failed: {e}");
         }
     }
 
     for &port in &diff.resolved {
-        eprintln!("whatcabled: ✓ port {port} restored");
+        eprintln!("usbeehived: ✓ port {port} restored");
         if let Err(e) = block_on(DevicesIface::capability_restored(emitter, port)) {
-            eprintln!("whatcabled: capability_restored emit failed: {e}");
+            eprintln!("usbeehived: capability_restored emit failed: {e}");
         }
     }
 }

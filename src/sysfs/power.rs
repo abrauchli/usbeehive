@@ -145,6 +145,6 @@ mod tests {
 
     #[test]
     fn missing_pd_dir_returns_empty() {
-        assert!(enumerate_in(Path::new("/no/such/whatcable/path")).is_empty());
+        assert!(enumerate_in(Path::new("/no/such/usbeehive/path")).is_empty());
     }
 }

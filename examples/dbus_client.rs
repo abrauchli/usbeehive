@@ -1,8 +1,8 @@
-//! Tiny D-Bus client for the `whatcabled` daemon.
+//! Tiny D-Bus client for the `usbeehived` daemon.
 //!
 //! ```sh
 //! # one terminal
-//! cargo run --no-default-features --features dbus --bin whatcabled
+//! cargo run --no-default-features --features dbus --bin usbeehived
 //!
 //! # another terminal
 //! cargo run --no-default-features --features dbus --example dbus_client
@@ -11,13 +11,13 @@
 //! Lists every device the daemon knows about, then asks for the charging
 //! diagnostic on Type-C `port_number` 0.
 
-use whatcable::dbus::{DeviceEntry, DiagnosticEntry, BUS_NAME, OBJECT_PATH};
+use usbeehive::dbus::{DeviceEntry, DiagnosticEntry, BUS_NAME, OBJECT_PATH};
 use zbus::blocking::Connection;
 use zbus::blocking::Proxy;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let conn = Connection::session()?;
-    let proxy = Proxy::new(&conn, BUS_NAME, OBJECT_PATH, "org.whatcable.Devices1")?;
+    let proxy = Proxy::new(&conn, BUS_NAME, OBJECT_PATH, "org.usbeehive.Devices1")?;
 
     let entries: Vec<DeviceEntry> = proxy.call("ListDevices", &())?;
     println!("== {} device(s) ==", entries.len());

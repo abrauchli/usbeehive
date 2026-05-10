@@ -7,7 +7,7 @@
 /// a `"0x..."` hex string.
 ///
 /// ```
-/// use whatcable::usbclass::class_name;
+/// use usbeehive::usbclass::class_name;
 /// assert_eq!(class_name(0x09), "Hub");
 /// assert_eq!(class_name(0xAA), "0xaa");
 /// ```

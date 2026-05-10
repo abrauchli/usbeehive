@@ -896,6 +896,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "usbeehive"
+version = "0.5.0"
+dependencies = [
+ "clap",
+ "libc",
+ "serde",
+ "serde_json",
+ "udev",
+ "zbus",
+]
+
+[[package]]
 name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1007,18 +1019,6 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "semver",
-]
-
-[[package]]
-name = "whatcable"
-version = "0.4.0"
-dependencies = [
- "clap",
- "libc",
- "serde",
- "serde_json",
- "udev",
- "zbus",
 ]
 
 [[package]]

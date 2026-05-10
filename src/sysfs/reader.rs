@@ -20,7 +20,7 @@ use super::error::{Error, Result};
 /// enumeration at a captured tree on disk.
 ///
 /// ```no_run
-/// use whatcable::Sysfs;
+/// use usbeehive::Sysfs;
 ///
 /// let sysfs = Sysfs::linux();
 /// let devices = sysfs.usb_devices();
@@ -200,10 +200,10 @@ mod tests {
 
     #[test]
     fn missing_paths_are_none() {
-        assert!(read_attr("/no/such/path/whatcable").is_none());
-        assert!(read_int("/no/such/path/whatcable").is_none());
-        assert!(read_hex("/no/such/path/whatcable").is_none());
-        assert!(!path_exists("/no/such/path/whatcable"));
+        assert!(read_attr("/no/such/path/usbeehive").is_none());
+        assert!(read_int("/no/such/path/usbeehive").is_none());
+        assert!(read_hex("/no/such/path/usbeehive").is_none());
+        assert!(!path_exists("/no/such/path/usbeehive"));
     }
 
     #[test]
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn try_with_root_rejects_missing() {
-        let err = Sysfs::try_with_root("/no/such/path/whatcable").unwrap_err();
+        let err = Sysfs::try_with_root("/no/such/path/usbeehive").unwrap_err();
         match err {
             Error::InvalidRoot(_) => {}
         }

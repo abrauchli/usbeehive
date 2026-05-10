@@ -1,21 +1,22 @@
-//! libudev hotplug monitor for [WhatCable](https://github.com/Zetaphor/whatcable-linux).
+//! libudev hotplug monitor for usbeehive (originally inspired by
+//! [Zetaphor/whatcable-linux](https://github.com/Zetaphor/whatcable-linux)).
 //!
 //! This crate is a thin wrapper around the [`udev`] crate that watches the
 //! `usb` and `typec` subsystems and notifies the caller when devices come
 //! and go. The intended usage is:
 //!
-//! 1. Take an initial snapshot (e.g. via `whatcable::DeviceManager::refresh`).
+//! 1. Take an initial snapshot (e.g. via `usbeehive::DeviceManager::refresh`).
 //! 2. Open a [`Watcher`] and treat it as a "did anything change?" signal.
 //! 3. Whenever the watcher fires, re-snapshot with `refresh()` and re-render.
 //!
-//! The crate does not pull in `whatcable-sysfs` — you can use it with any
+//! The crate does not pull in `usbeehive-sysfs` — you can use it with any
 //! re-enumeration strategy.
 //!
 //! # Quick start
 //!
 //! ```no_run
 //! use std::time::Duration;
-//! use whatcable::watch::{Watcher, WaitResult};
+//! use usbeehive::watch::{Watcher, WaitResult};
 //!
 //! let mut watcher = Watcher::new().unwrap();
 //! loop {
@@ -53,7 +54,7 @@ pub enum WaitResult {
 }
 
 /// Subscriptions for [`Watcher`]. Defaults to `usb` + `typec`, which is the
-/// pair WhatCable cares about.
+/// pair usbeehive cares about.
 #[derive(Debug, Clone)]
 pub struct WatcherConfig {
     /// Subsystems to subscribe to (passed to `udev_monitor_filter_add_match_subsystem_devtype`).
@@ -158,7 +159,7 @@ pub fn install_default_signal_handlers() {
 ///
 /// ```no_run
 /// use std::time::Duration;
-/// use whatcable::watch::run_loop;
+/// use usbeehive::watch::run_loop;
 ///
 /// run_loop(Duration::from_millis(500), |reason| {
 ///     println!("refresh because: {reason:?}");

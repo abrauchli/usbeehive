@@ -4,10 +4,10 @@
 // module — the public surface is still documented above each method.
 #![allow(missing_docs)]
 
-//! Optional D-Bus interface for `whatcable`.
+//! Optional D-Bus interface for `usbeehive`.
 //!
 //! Compiled only when the `dbus` Cargo feature is enabled. Hosts the
-//! `org.whatcable.Devices1` interface backing the `whatcabled` daemon, plus
+//! `org.usbeehive.Devices1` interface backing the `usbeehived` daemon, plus
 //! the wire types ([`DeviceEntry`], [`DiagnosticEntry`]) clients receive.
 //!
 //! The interface state is held behind an `Arc<Mutex<…>>` so the daemon's
@@ -17,9 +17,9 @@
 //!
 //! # Wire surface
 //!
-//! Bus name: `org.whatcable.Devices`
-//! Object path: `/org/whatcable/Devices`
-//! Interface: `org.whatcable.Devices1`
+//! Bus name: `org.usbeehive.Devices`
+//! Object path: `/org/usbeehive/Devices`
+//! Interface: `org.usbeehive.Devices1`
 //!
 //! | Member | Signature | Notes |
 //! |---|---|---|
@@ -152,7 +152,7 @@ impl State {
     }
 }
 
-/// `org.whatcable.Devices1` interface implementation.
+/// `org.usbeehive.Devices1` interface implementation.
 ///
 /// Hold one of these in an [`Arc`] (the inner `state` is already shared)
 /// and register it with `connection.object_server().at(PATH, iface)`.
@@ -194,7 +194,7 @@ impl DevicesIface {
     }
 }
 
-#[interface(name = "org.whatcable.Devices1")]
+#[interface(name = "org.usbeehive.Devices1")]
 impl DevicesIface {
     /// Return one [`DeviceEntry`] per summary in the latest snapshot.
     fn list_devices(&self) -> Vec<DeviceEntry> {
@@ -287,9 +287,9 @@ impl DevicesIface {
 }
 
 /// Bus name the daemon requests on the session bus.
-pub const BUS_NAME: &str = "org.whatcable.Devices";
+pub const BUS_NAME: &str = "org.usbeehive.Devices";
 /// Object path the [`DevicesIface`] is published at.
-pub const OBJECT_PATH: &str = "/org/whatcable/Devices";
+pub const OBJECT_PATH: &str = "/org/usbeehive/Devices";
 
 #[cfg(test)]
 mod tests {
@@ -338,7 +338,7 @@ mod tests {
 
     #[test]
     fn empty_state_yields_empty_iface_responses() {
-        let manager = DeviceManager::with_sysfs(crate::Sysfs::with_root("/no/such/whatcable"));
+        let manager = DeviceManager::with_sysfs(crate::Sysfs::with_root("/no/such/usbeehive"));
         let state = Arc::new(Mutex::new(State::new(manager)));
         let iface = DevicesIface { state };
         assert!(iface.snapshot_entries().is_empty());

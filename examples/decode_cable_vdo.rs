@@ -3,12 +3,12 @@
 //! Run with:
 //!
 //! ```sh
-//! cargo run -p whatcable-core --example decode_cable_vdo -- 0x00000642
+//! cargo run -p usbeehive-core --example decode_cable_vdo -- 0x00000642
 //! ```
 
 use std::process::ExitCode;
 
-use whatcable::pd::{
+use usbeehive::pd::{
     cable_current_label, cable_speed_label, decode_cable_vdo, decode_id_header, product_type_label,
 };
 
@@ -70,8 +70,8 @@ fn parse_hex(s: &str) -> u32 {
     })
 }
 
-fn p_label(p: whatcable::pd::ProductType) -> &'static str {
-    use whatcable::pd::ProductType::*;
+fn p_label(p: usbeehive::pd::ProductType) -> &'static str {
+    use usbeehive::pd::ProductType::*;
     match p {
         Hub => "hub",
         Peripheral => "peripheral",

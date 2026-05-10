@@ -1,6 +1,6 @@
-//! WhatCable: USB / USB-C / USB Power Delivery diagnostics for Linux.
+//! usbeehive: USB / USB-C / USB Power Delivery diagnostics for Linux.
 //!
-//! This crate ships the [`whatcable`](https://crates.io/crates/whatcable) CLI
+//! This crate ships the [`usbeehive`](https://crates.io/crates/usbeehive) CLI
 //! plus a library API. The library has three layers, each toggled by a Cargo
 //! feature so consumers pull in only what they need:
 //!
@@ -9,21 +9,21 @@
 //! | (none) | always on | Pure data types ([`UsbDevice`], [`TypeCPort`], [`PowerDeliveryPort`], …), USB-PD VDO decoders ([`pd::decode_id_header`], [`pd::decode_cable_vdo`]), [`ChargingDiagnostic`], [`DeviceSummary`]. No IO. |
 //! | `sysfs` | yes | [`Sysfs`] handle and [`DeviceManager`] — Linux `/sys` enumeration with an injectable root path. |
 //! | `watch` | yes | libudev hotplug monitor: [`watch::Watcher`] + [`watch::run_loop`]. |
-//! | `cli` | yes | The `whatcable` binary (clap + JSON / text rendering). |
+//! | `cli` | yes | The `usbeehive` binary (clap + JSON / text rendering). |
 //!
 //! Library-only consumers can drop the binary deps:
 //!
 //! ```toml
 //! [dependencies]
-//! whatcable = { version = "0.3", default-features = false }
+//! usbeehive = { version = "0.3", default-features = false }
 //! # for the sysfs backend without the bin / hotplug:
-//! whatcable = { version = "0.3", default-features = false, features = ["sysfs"] }
+//! usbeehive = { version = "0.3", default-features = false, features = ["sysfs"] }
 //! ```
 //!
 //! # Example — decode a Cable VDO
 //!
 //! ```
-//! use whatcable::pd::{decode_cable_vdo, CableSpeed, CableCurrent};
+//! use usbeehive::pd::{decode_cable_vdo, CableSpeed, CableCurrent};
 //!
 //! let v = decode_cable_vdo(2 | (2 << 5) | (3 << 9), false);
 //! assert_eq!(v.speed, CableSpeed::Usb32Gen2);
@@ -35,7 +35,7 @@
 //!
 //! ```no_run
 //! # #[cfg(feature = "sysfs")] {
-//! use whatcable::DeviceManager;
+//! use usbeehive::DeviceManager;
 //!
 //! let mut mgr = DeviceManager::new();
 //! mgr.refresh();

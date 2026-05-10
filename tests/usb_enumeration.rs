@@ -5,7 +5,7 @@
 mod fixture_builder;
 use fixture_builder::*;
 
-use whatcable::{DeviceManager, Sysfs};
+use usbeehive::{DeviceManager, Sysfs};
 
 #[test]
 fn enumerates_root_hub_with_keyboard_and_storage() {
@@ -243,7 +243,7 @@ fn deep_topology_preserves_parent_chain() {
 
 #[test]
 fn missing_root_yields_empty_manager() {
-    let mut mgr = DeviceManager::with_sysfs(Sysfs::with_root("/no/such/whatcable/path"));
+    let mut mgr = DeviceManager::with_sysfs(Sysfs::with_root("/no/such/usbeehive/path"));
     mgr.refresh();
     assert!(mgr.devices().is_empty());
     assert!(mgr.usb_devices().is_empty());

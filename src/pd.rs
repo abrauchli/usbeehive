@@ -15,7 +15,7 @@
 //! # Example
 //!
 //! ```
-//! use whatcable::pd::{decode_cable_vdo, CableSpeed, CableCurrent};
+//! use usbeehive::pd::{decode_cable_vdo, CableSpeed, CableCurrent};
 //!
 //! // CableVDO bits: speed=2 (USB 3.2 Gen 2), current=2 (5A), max VBUS=3 (50V)
 //! let raw = 2u32 | (2 << 5) | (3 << 9);

@@ -7,7 +7,7 @@
 //! point enumeration at a captured tree on disk.
 //!
 //! ```no_run
-//! use whatcable::DeviceManager;
+//! use usbeehive::DeviceManager;
 //!
 //! let mut mgr = DeviceManager::new();
 //! mgr.refresh();

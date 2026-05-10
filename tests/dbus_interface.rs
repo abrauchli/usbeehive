@@ -1,20 +1,20 @@
 #![cfg(feature = "dbus")]
 
-//! Integration tests for the optional `whatcable::dbus` interface.
+//! Integration tests for the optional `usbeehive::dbus` interface.
 //!
 //! The tests construct the `DevicesIface` against a fixture sysfs root and
 //! invoke its methods directly (without spinning up a real session bus) to
-//! exercise the same logic that `whatcabled` would expose to clients.
+//! exercise the same logic that `usbeehived` would expose to clients.
 //! Diff-driven signal classification is covered separately by
-//! [`whatcable::SnapshotDiff`] unit tests in `src/sysfs/manager.rs`.
+//! [`usbeehive::SnapshotDiff`] unit tests in `src/sysfs/manager.rs`.
 
 mod fixture_builder;
 use fixture_builder::*;
 
 use std::sync::{Arc, Mutex};
 
-use whatcable::dbus::{DevicesIface, State, BUS_NAME, OBJECT_PATH};
-use whatcable::{DeviceManager, Sysfs};
+use usbeehive::dbus::{DevicesIface, State, BUS_NAME, OBJECT_PATH};
+use usbeehive::{DeviceManager, Sysfs};
 
 fn make_state(root: &std::path::Path) -> Arc<Mutex<State>> {
     let mgr = DeviceManager::with_sysfs(Sysfs::with_root(root));
@@ -160,7 +160,7 @@ fn list_ports_enumerates_typec_ports_only() {
 fn refresh_updates_state_and_snapshot_diff_baseline_primes() {
     // `State::refresh` must compute a diff against the *previous* snapshot —
     // on the very first call, every visible device is "added" and any
-    // standing warning is "newly_degraded". The whatcabled daemon swallows
+    // standing warning is "newly_degraded". The usbeehived daemon swallows
     // that initial burst; here we just check the data is faithful.
     let root = TempRoot::new("dbus-refresh");
     write_port_with_cable_limit(root.path());
@@ -204,7 +204,7 @@ fn snapshot_json_round_trips_through_serde() {
             .manager
             .devices()
             .iter()
-            .map(whatcable::dbus::DeviceEntry::from)
+            .map(usbeehive::dbus::DeviceEntry::from)
             .collect::<Vec<_>>(),
     )
     .unwrap();
@@ -221,6 +221,6 @@ fn dbus_constants_match_freedesktop_naming() {
     // Soft sanity guard — these strings end up in `.service` files,
     // generated D-Bus stubs in other languages, and screenshots. Catch
     // accidental rename regressions.
-    assert_eq!(BUS_NAME, "org.whatcable.Devices");
-    assert_eq!(OBJECT_PATH, "/org/whatcable/Devices");
+    assert_eq!(BUS_NAME, "org.usbeehive.Devices");
+    assert_eq!(OBJECT_PATH, "/org/usbeehive/Devices");
 }

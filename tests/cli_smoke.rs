@@ -1,6 +1,6 @@
 #![cfg(feature = "cli")]
 
-//! End-to-end smoke tests for the `whatcable` binary.
+//! End-to-end smoke tests for the `usbeehive` binary.
 //!
 //! Builds a tiny sysfs tree on disk, invokes the binary with `--sysfs-root`
 //! pointed at it, and asserts on the stdout. Lifts coverage from "code
@@ -42,7 +42,7 @@ fn write_attr(dir: &Path, name: &str, value: &str) {
 }
 
 fn cli() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_whatcable"))
+    Command::new(env!("CARGO_BIN_EXE_usbeehive"))
 }
 
 fn write_keyboard_fixture(root: &Path) {
@@ -175,7 +175,7 @@ fn version_flag_works() {
     let out = cli().arg("--version").output().expect("binary runs");
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("whatcable"));
+    assert!(stdout.contains("usbeehive"));
 }
 
 #[test]

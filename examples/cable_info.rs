@@ -3,7 +3,7 @@
 //! captures.
 //!
 //! ```sh
-//! cargo run -p whatcable-core --example cable_info -- 0x205AC 0x000005AC 0 0x00000642
+//! cargo run -p usbeehive-core --example cable_info -- 0x205AC 0x000005AC 0 0x00000642
 //! ```
 //!
 //! The four hex args are pushed in order as `id_header`, `cert_stat`,
@@ -12,8 +12,8 @@
 
 use std::collections::BTreeMap;
 
-use whatcable::cable::CableInfo;
-use whatcable::typec::{TypeCCable, TypeCIdentity};
+use usbeehive::cable::CableInfo;
+use usbeehive::typec::{TypeCCable, TypeCIdentity};
 
 fn main() {
     let args: Vec<u32> = std::env::args()

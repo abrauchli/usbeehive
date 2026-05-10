@@ -113,7 +113,7 @@ impl Snapshot {
 /// Stateful enumerator that keeps the latest [`Snapshot`] in memory.
 ///
 /// ```no_run
-/// use whatcable::DeviceManager;
+/// use usbeehive::DeviceManager;
 ///
 /// let mut mgr = DeviceManager::new();
 /// mgr.refresh();
@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn manager_with_missing_sysfs_yields_empty_snapshot() {
-        let mut mgr = DeviceManager::with_sysfs(Sysfs::with_root("/no/such/whatcable/root"));
+        let mut mgr = DeviceManager::with_sysfs(Sysfs::with_root("/no/such/usbeehive/root"));
         mgr.refresh();
         let s = mgr.snapshot();
         assert!(s.usb_devices.is_empty());

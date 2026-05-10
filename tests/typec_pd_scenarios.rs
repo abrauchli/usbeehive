@@ -5,10 +5,10 @@
 mod fixture_builder;
 use fixture_builder::*;
 
-use whatcable::diagnostic::Bottleneck;
-use whatcable::pd::{CableCurrent, CableSpeed};
-use whatcable::summary::Status;
-use whatcable::{DeviceManager, Sysfs};
+use usbeehive::diagnostic::Bottleneck;
+use usbeehive::pd::{CableCurrent, CableSpeed};
+use usbeehive::summary::Status;
+use usbeehive::{DeviceManager, Sysfs};
 
 #[test]
 fn empty_typec_port_renders_disconnected() {
@@ -157,7 +157,7 @@ fn typec_charging_with_pps_charger_and_5a_active_cable() {
     let pps = pd
         .source_capabilities
         .iter()
-        .find(|p| matches!(p.r#type, whatcable::power::PdoType::Pps))
+        .find(|p| matches!(p.r#type, usbeehive::power::PdoType::Pps))
         .expect("PPS PDO present");
     assert_eq!(pps.voltage_mv, 3300);
     assert_eq!(pps.max_voltage_mv, 21_000);
@@ -167,7 +167,7 @@ fn typec_charging_with_pps_charger_and_5a_active_cable() {
     let fixed: Vec<_> = pd
         .source_capabilities
         .iter()
-        .filter(|p| matches!(p.r#type, whatcable::power::PdoType::FixedSupply))
+        .filter(|p| matches!(p.r#type, usbeehive::power::PdoType::FixedSupply))
         .collect();
     assert_eq!(fixed.len(), 4);
     assert_eq!(fixed.iter().map(|p| p.power_mw).max(), Some(100_000));

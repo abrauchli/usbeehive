@@ -1,7 +1,7 @@
 //! USB device data model.
 //!
 //! Plain-data types shared by every backend that produces a snapshot of a
-//! Linux USB tree. The actual sysfs walk lives in `whatcable-sysfs`.
+//! Linux USB tree. The actual sysfs walk lives in `usbeehive-sysfs`.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;

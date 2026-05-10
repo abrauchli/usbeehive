@@ -1,8 +1,8 @@
-# WhatCable — Agent Guidelines
+# usbeehive — Agent Guidelines
 
 ## Project overview
 
-WhatCable is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable)
+usbeehive is a Linux port of [WhatCable](https://github.com/darrylmorley/whatcable)
 (macOS) by Darryl Morley — a CLI tool, and a Rust library, that show USB
 device and USB-C cable information by reading Linux sysfs.
 
@@ -10,10 +10,14 @@ This repository is a Rust rewrite of the original C++ / CMake
 implementation, organised as a single Cargo crate with feature-gated
 layers.
 
+> Previously published on crates.io as `whatcable`; renamed to
+> `usbeehive` at the original author's request. See CHANGELOG entry
+> for 0.5.0.
+
 ## Layout
 
 ```
-whatcable/
+usbeehive/
 ├── Cargo.toml                          # one package
 ├── src/
 │   ├── lib.rs                          # public re-exports + module roots
@@ -34,7 +38,7 @@ whatcable/
 │   │   └── error.rs                    # Error / Result
 │   ├── watch.rs                        ← #[cfg(feature = "watch")]
 │   ├── dbus.rs                         ← #[cfg(feature = "dbus")]
-│   └── bin/whatcabled.rs               # D-Bus daemon  ← gated on `dbus`
+│   └── bin/usbeehived.rs               # D-Bus daemon  ← gated on `dbus`
 ├── tests/
 │   ├── fixture_builder.rs              # programmatic sysfs-tree builder
 │   ├── usb_enumeration.rs              # gated on `sysfs`
@@ -53,8 +57,8 @@ whatcable/
 | (none) | always | `serde` | Pure types + decoders + diagnostics |
 | `sysfs` | yes | `std::fs` | `/sys` enumeration, `Sysfs`, `DeviceManager` |
 | `watch` | yes | `udev`, `libc` | libudev hotplug (`Watcher`, `run_loop`) — implies `sysfs` |
-| `cli` | yes | `clap`, `serde_json` | `whatcable` binary — implies `sysfs` |
-| `dbus` | no | `zbus`, `serde_json` | `whatcable::dbus` module + `whatcabled` daemon publishing `org.whatcable.Devices1` — implies `watch` |
+| `cli` | yes | `clap`, `serde_json` | `usbeehive` binary — implies `sysfs` |
+| `dbus` | no | `zbus`, `serde_json` | `usbeehive::dbus` module + `usbeehived` daemon publishing `org.usbeehive.Devices1` — implies `watch` |
 
 `watch` and `cli` both transitively enable `sysfs`; `dbus` enables `watch`
 (and therefore `sysfs`). Pure-decoder consumers go
@@ -98,10 +102,10 @@ cargo test --no-default-features    # decoders only, no libudev (50 tests)
 
 Manual smoke tests:
 
-- `./target/debug/whatcable`
-- `./target/debug/whatcable --json`
-- `./target/debug/whatcable --watch`     (requires `watch` feature)
-- `./target/debug/whatcable --sysfs-root tests/fixture-root`
+- `./target/debug/usbeehive`
+- `./target/debug/usbeehive --json`
+- `./target/debug/usbeehive --watch`     (requires `watch` feature)
+- `./target/debug/usbeehive --sysfs-root tests/fixture-root`
 
 ## Adding a new sysfs scenario
 
@@ -122,8 +126,8 @@ Manual smoke tests:
 | `src/sysfs/reader.rs` | `Sysfs` handle + `read_attr` / `read_int` / `read_hex` |
 | `src/sysfs/manager.rs` | `DeviceManager` + `Snapshot` |
 | `src/watch.rs` | `Watcher` + `run_loop` |
-| `src/dbus.rs` | `org.whatcable.Devices1` interface + `DeviceEntry` / `DiagnosticEntry` wire types |
-| `src/bin/whatcabled.rs` | D-Bus daemon entrypoint (zbus + hot-plug thread) |
+| `src/dbus.rs` | `org.usbeehive.Devices1` interface + `DeviceEntry` / `DiagnosticEntry` wire types |
+| `src/bin/usbeehived.rs` | D-Bus daemon entrypoint (zbus + hot-plug thread) |
 | `src/output.rs` | CLI text + JSON rendering |
 | `src/main.rs` | CLI parser + dispatch |
 | `tests/fixture_builder.rs` | Programmatic sysfs-tree builder |

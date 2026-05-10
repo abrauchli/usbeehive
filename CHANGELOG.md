@@ -5,18 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-05-09
 
-### Added
+**Project renamed: `whatcable` → `usbeehive`.** At the request of the
+original WhatCable author Darryl Morley, this Rust port no longer ships
+under the `whatcable` name. The project, crate, CLI binary, daemon, and
+D-Bus interface have all been renamed; thanks to Darryl for suggesting
+the new name.
 
-- **Optional D-Bus interface (`dbus` feature).** New `whatcable::dbus`
-  module exposing `org.whatcable.Devices1` (object path
-  `/org/whatcable/Devices`) with `ListDevices`, `ListPorts`, `Diagnose`,
+### Changed
+
+- **Crate name:** `whatcable` → `usbeehive` (install with
+  `cargo install usbeehive`). The previous `whatcable` crate is retired
+  on crates.io with a redirect README; older versions are yanked.
+- **CLI binary:** `whatcable` → `usbeehive`.
+- **Daemon binary:** `whatcabled` → `usbeehived`.
+- **D-Bus bus name / object path / interface:**
+  `org.whatcable.Devices` → `org.usbeehive.Devices`,
+  `/org/whatcable/Devices` → `/org/usbeehive/Devices`,
+  `org.whatcable.Devices1` → `org.usbeehive.Devices1`. Existing D-Bus
+  clients must update their proxy bindings.
+- **Repository home:** [`abrauchli/whatcable`](https://github.com/abrauchli/whatcable)
+  → [`abrauchli/usbeehive`](https://github.com/abrauchli/usbeehive). Full
+  history was preserved in the move; the old repo is archived and points
+  here.
+
+### Added (carried over from unreleased)
+
+- **Optional D-Bus interface (`dbus` feature).** New `usbeehive::dbus`
+  module exposing `org.usbeehive.Devices1` (object path
+  `/org/usbeehive/Devices`) with `ListDevices`, `ListPorts`, `Diagnose`,
   `SnapshotJson`, `Refresh` methods, `Version` / `DeviceCount`
   properties, and `DeviceAdded` / `DeviceRemoved` /
   `CapabilityDegraded` / `CapabilityRestored` signals. Disabled by
   default — pulls in `zbus` only when requested.
-- **`whatcabled` daemon binary** (built with `--features dbus`). Runs
+- **`usbeehived` daemon binary** (built with `--features dbus`). Runs
   the libudev hot-plug loop in a background thread and emits D-Bus
   signals as the snapshot changes. Suppresses signals on the initial
   baseline refresh so already-plugged devices don't re-fire as fresh
@@ -30,6 +53,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   diff key.
 - `examples/dbus_client.rs` — minimal `zbus` client that lists devices
   and queries port 0's diagnostic.
+
+### Migration from `whatcable` 0.4.0
+
+```toml
+# Cargo.toml — change the dependency name and version:
+- whatcable = "0.4"
++ usbeehive = "0.5"
+```
+
+```rust
+// Code — global rename:
+- use whatcable::{DeviceManager, pd::*};
++ use usbeehive::{DeviceManager, pd::*};
+```
+
+```sh
+# D-Bus clients — update bus name and interface:
+- gdbus call --session --dest org.whatcable.Devices …
++ gdbus call --session --dest org.usbeehive.Devices …
+```
+
+The library API is otherwise identical to `whatcable` 0.4.0 plus the
+D-Bus additions listed above; no breaking type / function changes
+beyond the rename.
 
 ## [0.4.0] - 2026-05-08
 
@@ -72,8 +119,9 @@ Metadata-only patch release.
 ### Changed
 
 - `repository` and `homepage` in `Cargo.toml` now point to
-  `github.com/abrauchli/whatcable` (the active fork) instead of the
-  upstream Zetaphor repo.
+  `github.com/abrauchli/whatcable` (the active fork at the time;
+  later renamed to `abrauchli/usbeehive`) instead of the upstream
+  Zetaphor repo.
 - MSRV correctly declared as `1.85` (was `1.74` in 0.3.0; the actual
   build hasn't worked on 1.74 since `clap_lex 1.1` adopted edition
   2024). Users running stable Rust are unaffected.
@@ -173,7 +221,7 @@ For library consumers:
 - Cast signal handler through `*const ()` for clippy fn-to-int lint.
 - Re-enable `watch` feature by default.
 
-[0.4.0]: https://github.com/abrauchli/whatcable/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/abrauchli/whatcable/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/abrauchli/whatcable/compare/v0.2.1...v0.3.0
-[0.2.1]: https://github.com/abrauchli/whatcable/releases/tag/v0.2.1
+[0.4.0]: https://github.com/abrauchli/usbeehive/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/abrauchli/usbeehive/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/abrauchli/usbeehive/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/abrauchli/usbeehive/releases/tag/v0.2.1

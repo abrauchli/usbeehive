@@ -31,16 +31,16 @@ jobs:
       - name: Package CLI binary
         run: |
           mkdir -p target/dist
-          cp target/release/whatcable target/dist/
+          cp target/release/usbeehive target/dist/
           cd target/dist
-          tar czf ../whatcable-${GITHUB_REF_NAME}-x86_64-linux.tar.gz whatcable
+          tar czf ../usbeehive-${GITHUB_REF_NAME}-x86_64-linux.tar.gz usbeehive
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
           name: release-assets
           path: |
-            target/whatcable-*.tar.gz
+            target/usbeehive-*.tar.gz
 
   release:
     needs: build
@@ -63,19 +63,19 @@ jobs:
 
             | File | Description |
             |------|-------------|
-            | `whatcable-${{ github.ref_name }}-x86_64-linux.tar.gz` | CLI binary. Extract and run `./whatcable`. |
+            | `usbeehive-${{ github.ref_name }}-x86_64-linux.tar.gz` | CLI binary. Extract and run `./usbeehive`. |
 
             ### Quick install
 
             ```bash
-            tar xzf whatcable-${{ github.ref_name }}-x86_64-linux.tar.gz
-            sudo mv whatcable /usr/local/bin/
+            tar xzf usbeehive-${{ github.ref_name }}-x86_64-linux.tar.gz
+            sudo mv usbeehive /usr/local/bin/
             ```
 
             Or via Cargo:
 
             ```bash
-            cargo install whatcable
+            cargo install usbeehive
             ```
           files: |
             assets/**/*.tar.gz
