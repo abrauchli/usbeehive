@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-05-09
+
+Lint-only patch release. No behavior, API, or D-Bus interface changes.
+
+### Fixed
+
+- `cargo fmt --all`: re-flow long expression and chained iterator blocks
+  that the original D-Bus daemon work landed unformatted.
+- Replace 7× `&[x.clone()]` test-fixture argument patterns in
+  `src/sysfs/manager.rs` with `std::slice::from_ref(&x)` to satisfy
+  `clippy::cloned_ref_to_slice_refs` under `-D warnings`.
+- Refactor `tests/dbus_interface.rs` so the crate-level `//!` doc
+  comment is unconditional and only the dbus-dependent code is gated
+  on `#[cfg(feature = "dbus")]`. Previously the entire file was
+  cfg-gated, which stripped the doc comment when the feature was off
+  and tripped `missing_docs` under CI's `cargo clippy --all-targets
+  -- -D warnings` invocation.
+
 ## [0.5.0] - 2026-05-09
 
 **Project renamed: `whatcable` → `usbeehive`.** At the request of the
@@ -221,6 +239,8 @@ For library consumers:
 - Cast signal handler through `*const ()` for clippy fn-to-int lint.
 - Re-enable `watch` feature by default.
 
+[0.5.1]: https://github.com/abrauchli/usbeehive/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/abrauchli/usbeehive/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/abrauchli/usbeehive/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/abrauchli/usbeehive/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/abrauchli/usbeehive/compare/v0.2.1...v0.3.0
