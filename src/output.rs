@@ -191,10 +191,7 @@ fn print_branch<W: Write>(
         }
     }
 
-    writeln!(
-        w,
-        "{prefix}{color}{connector}{style}{name}{RESET}{hint}"
-    )?;
+    writeln!(w, "{prefix}{color}{connector}{style}{name}{RESET}{hint}")?;
 
     let next_prefix = format!("{prefix}{DIM}{}{RESET}", if last { "   " } else { "│  " });
     let n = dev.children.len();

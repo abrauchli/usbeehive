@@ -42,8 +42,8 @@ use zbus::interface;
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::Type;
 
-use crate::sysfs::manager::{DeviceManager, Snapshot, SnapshotDiff};
 use crate::summary::DeviceSummary;
+use crate::sysfs::manager::{DeviceManager, Snapshot, SnapshotDiff};
 
 /// One device or Type-C port as published over D-Bus.
 ///
@@ -73,11 +73,7 @@ pub struct DeviceEntry {
 
 impl From<&DeviceSummary> for DeviceEntry {
     fn from(s: &DeviceSummary) -> Self {
-        let port_number = s
-            .typec_port
-            .as_ref()
-            .map(|p| p.port_number)
-            .unwrap_or(-1);
+        let port_number = s.typec_port.as_ref().map(|p| p.port_number).unwrap_or(-1);
         DeviceEntry {
             id: s.id(),
             category: format!("{:?}", s.category),
@@ -166,19 +162,23 @@ impl DevicesIface {
     /// the same vector that the `ListDevices` D-Bus method would.
     pub fn snapshot_entries(&self) -> Vec<DeviceEntry> {
         let state = self.state.lock().expect("state mutex poisoned");
-        state.manager.devices().iter().map(DeviceEntry::from).collect()
+        state
+            .manager
+            .devices()
+            .iter()
+            .map(DeviceEntry::from)
+            .collect()
     }
 
     /// Helper for tests / clients embedding the iface in-process. Returns
     /// the same payload as the `Diagnose` D-Bus method.
     pub fn diagnose_port(&self, port_number: i32) -> DiagnosticEntry {
         let state = self.state.lock().expect("state mutex poisoned");
-        let Some(summary) = state
-            .manager
-            .devices()
-            .iter()
-            .find(|s| s.typec_port.as_ref().is_some_and(|p| p.port_number == port_number))
-        else {
+        let Some(summary) = state.manager.devices().iter().find(|s| {
+            s.typec_port
+                .as_ref()
+                .is_some_and(|p| p.port_number == port_number)
+        }) else {
             return DiagnosticEntry::default();
         };
         match &summary.charging_diag {

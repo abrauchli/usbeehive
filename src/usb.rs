@@ -268,7 +268,10 @@ mod tests {
             is_root_hub: root,
             ..Default::default()
         };
-        assert_eq!(mk("5-2.4.1", false).parent_bus_port().as_deref(), Some("5-2.4"));
+        assert_eq!(
+            mk("5-2.4.1", false).parent_bus_port().as_deref(),
+            Some("5-2.4")
+        );
         assert_eq!(mk("1-1", false).parent_bus_port().as_deref(), Some("usb1"));
         assert_eq!(mk("usb5", true).parent_bus_port(), None);
     }
@@ -289,7 +292,10 @@ mod tests {
             ..Default::default()
         };
         let devs = vec![root, attached, orphan];
-        let roots: Vec<&str> = tree_roots(&devs).iter().map(|d| d.bus_port.as_str()).collect();
+        let roots: Vec<&str> = tree_roots(&devs)
+            .iter()
+            .map(|d| d.bus_port.as_str())
+            .collect();
         assert!(roots.contains(&"usb1"));
         assert!(roots.contains(&"9-9"));
         assert!(!roots.contains(&"1-1"));

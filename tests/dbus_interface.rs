@@ -151,7 +151,10 @@ fn list_ports_enumerates_typec_ports_only() {
         .collect();
     assert!(port_numbers.contains(&0));
     assert!(port_numbers.contains(&1));
-    let usbs: Vec<&_> = entries.iter().filter(|e| e.category == "UsbDevice").collect();
+    let usbs: Vec<&_> = entries
+        .iter()
+        .filter(|e| e.category == "UsbDevice")
+        .collect();
     assert_eq!(usbs.len(), 1);
     assert_eq!(usbs[0].headline, "iPhone");
 }

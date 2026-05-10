@@ -58,10 +58,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let result = run_loop(Duration::from_millis(500), |reason| {
             // Snapshot diff under the lock, but don't hold it while we hop
             // into D-Bus signal emission.
-            let (diff, headline_lookup): (
-                usbeehive::SnapshotDiff,
-                Vec<(String, String)>,
-            ) = {
+            let (diff, headline_lookup): (usbeehive::SnapshotDiff, Vec<(String, String)>) = {
                 let mut guard = watcher_state.lock().expect("state mutex poisoned");
                 let diff = guard.refresh();
                 let headlines: Vec<(String, String)> = diff
@@ -139,11 +136,7 @@ fn emit_signals(
                 .manager
                 .devices()
                 .iter()
-                .find(|s| {
-                    s.typec_port
-                        .as_ref()
-                        .is_some_and(|p| p.port_number == port)
-                })
+                .find(|s| s.typec_port.as_ref().is_some_and(|p| p.port_number == port))
                 .and_then(|s| {
                     s.charging_diag
                         .as_ref()

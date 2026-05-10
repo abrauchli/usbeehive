@@ -314,11 +314,11 @@ mod tests {
             ..Default::default()
         };
         let prev = Snapshot {
-            summaries: build_summaries(&[usb_a.clone()], &[], &[]),
+            summaries: build_summaries(std::slice::from_ref(&usb_a), &[], &[]),
             ..Default::default()
         };
         let cur = Snapshot {
-            summaries: build_summaries(&[usb_b.clone()], &[], &[]),
+            summaries: build_summaries(std::slice::from_ref(&usb_b), &[], &[]),
             ..Default::default()
         };
         let diff = cur.diff(&prev);
@@ -348,11 +348,15 @@ mod tests {
 
         // Previous: same port, no charger → no diagnostic.
         let prev = Snapshot {
-            summaries: build_summaries(&[], &[port.clone()], &[]),
+            summaries: build_summaries(&[], std::slice::from_ref(&port), &[]),
             ..Default::default()
         };
         // Current: charger plugged in, but the cable is rated only 60W.
-        let mut summaries = build_summaries(&[], &[port.clone()], &[charger.clone()]);
+        let mut summaries = build_summaries(
+            &[],
+            std::slice::from_ref(&port),
+            std::slice::from_ref(&charger),
+        );
         // Inject a CableLimit warning so we don't depend on the cable decoder
         // for this assertion.
         summaries[0].charging_diag = Some(crate::diagnostic::ChargingDiagnostic {
@@ -377,7 +381,7 @@ mod tests {
             partner: Some(TypeCPartner::default()),
             ..Default::default()
         };
-        let mut prev_summaries = build_summaries(&[], &[port.clone()], &[]);
+        let mut prev_summaries = build_summaries(&[], std::slice::from_ref(&port), &[]);
         prev_summaries[0].charging_diag = Some(crate::diagnostic::ChargingDiagnostic {
             bottleneck: crate::diagnostic::Bottleneck::CableLimit,
             summary: "Cable is limiting charging speed".into(),
@@ -390,7 +394,7 @@ mod tests {
         };
         // Current: same port, no warning anymore.
         let cur = Snapshot {
-            summaries: build_summaries(&[], &[port.clone()], &[]),
+            summaries: build_summaries(&[], std::slice::from_ref(&port), &[]),
             ..Default::default()
         };
         let diff = cur.diff(&prev);
