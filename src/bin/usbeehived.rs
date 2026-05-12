@@ -14,8 +14,18 @@
 //!     --object-path /org/usbeehive/Devices \
 //!     --method org.usbeehive.Devices1.ListDevices
 //! ```
+//!
+//! ## systemd user service
+//!
+//! `usbeehived --install-service` writes a unit to
+//! `$XDG_CONFIG_HOME/systemd/user/usbeehived.service` (default
+//! `~/.config/systemd/user/`) with `ExecStart` set to the current binary
+//! path, then runs `systemctl --user daemon-reload`. Symmetric
+//! `--uninstall-service` stops, disables, and removes it.
 
 use std::io::{self, Write};
+use std::path::PathBuf;
+use std::process::{Command, ExitCode, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -27,7 +37,63 @@ use usbeehive::DeviceManager;
 use zbus::block_on;
 use zbus::blocking::connection;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+const SERVICE_FILE_NAME: &str = "usbeehived.service";
+
+fn main() -> ExitCode {
+    let mut args = std::env::args().skip(1);
+    match args.next().as_deref() {
+        None => match run_daemon() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("usbeehived: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("--install-service") => match install_service() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("usbeehived: install failed: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("--uninstall-service") => match uninstall_service() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("usbeehived: uninstall failed: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        Some("--help" | "-h") => {
+            print_help();
+            ExitCode::SUCCESS
+        }
+        Some("--version" | "-V") => {
+            println!("usbeehived {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
+        Some(other) => {
+            eprintln!("usbeehived: unknown argument: {other}");
+            print_help();
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print_help() {
+    println!(
+        "usbeehived {} — D-Bus daemon for usbeehive\n\
+         \n\
+         USAGE:\n\
+         \x20   usbeehived                     Run the daemon (default)\n\
+         \x20   usbeehived --install-service   Install systemd user unit and reload\n\
+         \x20   usbeehived --uninstall-service Stop, disable, and remove the unit\n\
+         \x20   usbeehived --help              Show this help\n\
+         \x20   usbeehived --version           Show version",
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
+fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("usbeehived {}: starting…", env!("CARGO_PKG_VERSION"));
 
     // Manager + state are shared between dispatch thread (zbus) and the
@@ -157,5 +223,162 @@ fn emit_signals(
         if let Err(e) = block_on(DevicesIface::capability_restored(emitter, port)) {
             eprintln!("usbeehived: capability_restored emit failed: {e}");
         }
+    }
+}
+
+fn user_unit_dir() -> Result<PathBuf, String> {
+    resolve_unit_dir(
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        std::env::var_os("HOME").as_deref(),
+    )
+}
+
+fn resolve_unit_dir(
+    xdg_config_home: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+) -> Result<PathBuf, String> {
+    if let Some(dir) = xdg_config_home {
+        let p = PathBuf::from(dir);
+        if p.is_absolute() {
+            return Ok(p.join("systemd/user"));
+        }
+    }
+    let home = home.ok_or("HOME is not set")?;
+    Ok(PathBuf::from(home).join(".config/systemd/user"))
+}
+
+fn render_unit(exec_start: &std::path::Path) -> String {
+    format!(
+        "[Unit]\n\
+         Description=usbeehive D-Bus daemon (USB device watcher)\n\
+         Documentation=https://github.com/abrauchli/usbeehive\n\
+         After=dbus.socket\n\
+         Requires=dbus.socket\n\
+         \n\
+         [Service]\n\
+         Type=dbus\n\
+         BusName={bus}\n\
+         ExecStart={exec}\n\
+         Restart=on-failure\n\
+         RestartSec=2\n\
+         \n\
+         [Install]\n\
+         WantedBy=default.target\n",
+        bus = BUS_NAME,
+        exec = exec_start.display(),
+    )
+}
+
+fn install_service() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("cannot resolve current exe: {e}"))?;
+    let exe = exe
+        .canonicalize()
+        .map_err(|e| format!("cannot canonicalize {}: {e}", exe.display()))?;
+
+    let dir = user_unit_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
+    let path = dir.join(SERVICE_FILE_NAME);
+
+    let existed = path.exists();
+    let unit = render_unit(&exe);
+    std::fs::write(&path, unit).map_err(|e| format!("write {}: {e}", path.display()))?;
+
+    eprintln!(
+        "usbeehived: {} {}",
+        if existed { "updated" } else { "installed" },
+        path.display()
+    );
+    eprintln!("usbeehived:   ExecStart={}", exe.display());
+
+    match Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status()
+    {
+        Ok(s) if s.success() => {}
+        Ok(s) => eprintln!("usbeehived: systemctl --user daemon-reload exited with {s}"),
+        Err(e) => eprintln!("usbeehived: could not run systemctl ({e}); skip daemon-reload"),
+    }
+
+    println!("Next steps:");
+    println!("  systemctl --user enable --now usbeehived.service");
+    println!("  systemctl --user status usbeehived.service");
+    println!("  journalctl --user -u usbeehived.service -f");
+    Ok(())
+}
+
+fn uninstall_service() -> Result<(), String> {
+    let dir = user_unit_dir()?;
+    let path = dir.join(SERVICE_FILE_NAME);
+
+    // Best-effort stop+disable+reset before removing. The unit may not be
+    // enabled, loaded, or systemctl may be absent — suppress noise from
+    // those expected "nothing to do" cases.
+    let quiet = |args: &[&str]| {
+        let _ = Command::new("systemctl")
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    };
+    quiet(&["--user", "disable", "--now", SERVICE_FILE_NAME]);
+
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| format!("remove {}: {e}", path.display()))?;
+        eprintln!("usbeehived: removed {}", path.display());
+    } else {
+        eprintln!(
+            "usbeehived: no unit at {} (already uninstalled)",
+            path.display()
+        );
+    }
+
+    quiet(&["--user", "daemon-reload"]);
+    quiet(&["--user", "reset-failed", SERVICE_FILE_NAME]);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    #[test]
+    fn render_unit_substitutes_exec_start() {
+        let unit = render_unit(Path::new("/opt/usbeehived/usbeehived"));
+        assert!(unit.contains("ExecStart=/opt/usbeehived/usbeehived\n"));
+        assert!(unit.contains(&format!("BusName={BUS_NAME}\n")));
+        assert!(unit.contains("Type=dbus\n"));
+        assert!(unit.contains("[Install]\nWantedBy=default.target\n"));
+        assert!(unit.contains("After=dbus.socket"));
+    }
+
+    #[test]
+    fn resolve_unit_dir_prefers_absolute_xdg() {
+        let xdg = OsStr::new("/srv/xdg");
+        let home = OsStr::new("/home/u");
+        let dir = resolve_unit_dir(Some(xdg), Some(home)).unwrap();
+        assert_eq!(dir, PathBuf::from("/srv/xdg/systemd/user"));
+    }
+
+    #[test]
+    fn resolve_unit_dir_ignores_relative_xdg() {
+        let xdg = OsStr::new("relative/config");
+        let home = OsStr::new("/home/u");
+        let dir = resolve_unit_dir(Some(xdg), Some(home)).unwrap();
+        assert_eq!(dir, PathBuf::from("/home/u/.config/systemd/user"));
+    }
+
+    #[test]
+    fn resolve_unit_dir_falls_back_to_home() {
+        let home = OsStr::new("/home/u");
+        let dir = resolve_unit_dir(None, Some(home)).unwrap();
+        assert_eq!(dir, PathBuf::from("/home/u/.config/systemd/user"));
+    }
+
+    #[test]
+    fn resolve_unit_dir_errors_without_home_or_absolute_xdg() {
+        assert!(resolve_unit_dir(None, None).is_err());
+        assert!(resolve_unit_dir(Some(OsStr::new("rel")), None).is_err());
     }
 }

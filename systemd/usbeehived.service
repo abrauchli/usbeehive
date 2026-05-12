@@ -1,0 +1,34 @@
+# Reference systemd user unit for usbeehived.
+#
+# Easiest install: let the daemon do it (writes the unit with the correct
+# absolute ExecStart and runs `systemctl --user daemon-reload`):
+#
+#     usbeehived --install-service
+#     systemctl --user enable --now usbeehived.service
+#
+# To uninstall:
+#
+#     usbeehived --uninstall-service
+#
+# Manual install: copy this file to ~/.config/systemd/user/usbeehived.service
+# and edit ExecStart to point at your `usbeehived` binary, then run
+# `systemctl --user daemon-reload`.
+
+[Unit]
+Description=usbeehive D-Bus daemon (USB device watcher)
+Documentation=https://github.com/abrauchli/usbeehive
+After=dbus.socket
+Requires=dbus.socket
+
+[Service]
+Type=dbus
+BusName=org.usbeehive.Devices
+# Adjust to wherever your `usbeehived` binary lives. Examples:
+#   cargo install --no-default-features --features dbus --path .
+#     -> ExecStart=%h/.cargo/bin/usbeehived
+ExecStart=%h/.cargo/bin/usbeehived
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
