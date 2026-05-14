@@ -99,7 +99,7 @@ consumers pull in only what they need.
 | `sysfs` | yes | `Sysfs` handle + `DeviceManager` — Linux `/sys` enumeration with injectable root. |
 | `watch` | yes | libudev hotplug monitor: `watch::Watcher` + `watch::run_loop`. |
 | `cli` | yes | The `usbeehive` binary (clap + JSON / text rendering). |
-| `dbus` | no | `usbeehive::dbus` interface module + the `usbeehived` daemon binary publishing `org.usbeehive.Devices1` on the session bus (implies `watch`). |
+| `dbus` | no | `usbeehive::dbus` interface module + the `usbeehived` daemon binary publishing `org.usbeehive.Devices2` on the session bus (implies `watch`). |
 
 Library-only consumers can drop the binary deps:
 
@@ -166,13 +166,16 @@ cargo build --release --no-default-features --features dbus
 ./target/release/usbeehived                                # foreground
 ```
 
-Wire surface — `org.usbeehive.Devices1` at `/org/usbeehive/Devices`:
+Wire surface — `org.usbeehive.Devices2` at `/org/usbeehive/Devices`:
+
+Each `ListDevices` entry is a 19-field tuple:
+`(id, category, device_class, device_subclass, status, headline, subtitle, icon, vendor, product, vendor_id, product_id, primary_driver, properties, port_number, link_speed_mbps, usb_version, power, charging_diag)`. See [`src/dbus.rs`](src/dbus.rs) module docs for per-field semantics.
 
 | Member | Kind | Notes |
 |---|---|---|
-| `ListDevices` | method `() → a(...)` | One entry per summary (id, headline, bullets, icon, …). |
+| `ListDevices` | method `() → a(ssssssssssqqsa(ss)ius(uus)(bsssb))` | One structured entry per summary. Properties are `(machine_key, value)` pairs. |
 | `ListPorts` | method `() → ai` | Type-C `port_number`s currently exposed. |
-| `Diagnose` | method `(i) → (...)` | Charging diagnostic for a port (`bottleneck`, `summary`, `is_warning`). |
+| `Diagnose` | method `(i) → (bsssb)` | Charging diagnostic for a port — same shape as the per-entry `charging_diag`. `present == false` when none available. |
 | `SnapshotJson` | method `() → s` | Full structured snapshot — same shape as `usbeehive --json`. |
 | `Refresh` | method `() → u` | Force a re-enumeration; returns the new device count. |
 | `Version` / `DeviceCount` | properties | Crate version + summary count. |
@@ -184,10 +187,19 @@ Quick poke from the shell:
 ```sh
 gdbus call --session --dest org.usbeehive.Devices \
     --object-path /org/usbeehive/Devices \
-    --method org.usbeehive.Devices1.ListDevices
+    --method org.usbeehive.Devices2.ListDevices
 ```
 
 A minimal Rust client lives in [`examples/dbus_client.rs`](examples/dbus_client.rs).
+
+### Devices2 migration
+
+`Devices1` was retired in favor of `Devices2` — clients must update both
+the interface name and how they consume the per-entry payload. Adding
+new enum variants (`device_class`, `status`, `power_role`, `bottleneck`)
+is non-breaking; clients MUST treat any unrecognized string as
+`Unknown` / fall back to category-based behavior. The CHANGELOG has the
+full regex → field migration table.
 
 ## How it works
 

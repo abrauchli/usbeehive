@@ -67,6 +67,50 @@ mod dbus_tests {
     }
 
     #[test]
+    fn list_devices_carries_full_structured_fields() {
+        // Exercises every top-level structured field on the Devices2 wire
+        // against the cable-limit fixture (60W cable + 100W charger).
+        let root = TempRoot::new("dbus-structured");
+        write_port_with_cable_limit(root.path());
+
+        let state = make_state(root.path());
+        {
+            let mut guard = state.lock().unwrap();
+            guard.refresh();
+        }
+        let iface = DevicesIface { state };
+        let entries = iface.snapshot_entries();
+
+        let port = entries.iter().find(|e| e.category == "TypeCPort").unwrap();
+        // Structural shape.
+        assert_eq!(port.device_class, "Unknown"); // Type-C ports → Unknown
+        assert_eq!(port.status, "Charging"); // PD source advertised
+        assert_eq!(port.port_number, 0);
+
+        // Power flow — sinking 100W from the charger.
+        assert_eq!(port.power.power_role, "Sink");
+        assert_eq!(port.power.power_in_mw, 100_000);
+        assert_eq!(port.power.power_out_mw, 0);
+
+        // Charging diagnostic carried on the entry — no separate Diagnose()
+        // round-trip needed.
+        assert!(port.charging_diag.present);
+        assert_eq!(port.charging_diag.bottleneck, "CableLimit");
+        assert!(port.charging_diag.is_warning);
+
+        // Properties carry the cable + charger detail with machine keys.
+        let p: std::collections::HashMap<_, _> = port
+            .properties
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert!(p.contains_key("cable_max_power"));
+        assert!(p.contains_key("charger_max"));
+        // No prose-bullet remnants.
+        assert!(!p.iter().any(|(k, _)| k.starts_with("Charger")));
+    }
+
+    #[test]
     fn list_devices_returns_one_entry_per_summary() {
         let root = TempRoot::new("dbus-list");
         write_port_with_cable_limit(root.path());

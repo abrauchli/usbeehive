@@ -9,6 +9,32 @@ use usbeehive::usb::{tree_roots, UsbDevice};
 use usbeehive::usbclass;
 use usbeehive::{DeviceManager, LinkSpeed};
 
+/// Machine property keys → English display labels. The daemon emits
+/// machine keys only; the CLI text renderer owns the display vocabulary.
+/// Unknown keys fall through to their raw form so adding a new property
+/// key on the daemon side surfaces without an `output.rs` change (just
+/// uglier).
+fn property_label(key: &str) -> String {
+    match key {
+        "serial" => "Serial".into(),
+        "mount" => "Mount".into(),
+        "drivers" => "Drivers".into(),
+        "data_role" => "Data role".into(),
+        "power_mode" => "Power mode".into(),
+        "pd_revision" => "PD revision".into(),
+        "plug_orientation" => "Plug orientation".into(),
+        "pd_contract" => "PD contract".into(),
+        "cable_speed" => "Cable speed".into(),
+        "cable_current" => "Cable current".into(),
+        "cable_max_power" => "Cable max power".into(),
+        "cable_type" => "Cable type".into(),
+        "cable_vendor" => "Cable vendor".into(),
+        "charger_max" => "Charger max".into(),
+        "usb_power_ma" => "Bus power (mA)".into(),
+        other => other.into(),
+    }
+}
+
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
@@ -45,8 +71,37 @@ fn print_text_iter<W: Write>(
         if !dev.subtitle.is_empty() {
             writeln!(w, "  {}", dev.subtitle)?;
         }
-        for b in &dev.bullets {
-            writeln!(w, "  {DIM}• {RESET}{b}")?;
+        // Render the typed top-level fields first — link speed, version,
+        // VID:PID — then the looser properties bag.
+        if dev.link_speed_mbps > 0 {
+            let label = usbeehive::usb::link_speed_tier(dev.link_speed_mbps).label();
+            writeln!(w, "  {DIM}• {RESET}{label}")?;
+        }
+        if !dev.usb_version.is_empty() {
+            writeln!(w, "  {DIM}• {RESET}USB {}", dev.usb_version)?;
+        }
+        if dev.vendor_id != 0 || dev.product_id != 0 {
+            writeln!(
+                w,
+                "  {DIM}• {RESET}VID:PID {:04x}:{:04x}",
+                dev.vendor_id, dev.product_id
+            )?;
+        }
+        if !dev.primary_driver.is_empty() {
+            writeln!(w, "  {DIM}• {RESET}Driver: {}", dev.primary_driver)?;
+        }
+        if dev.power.power_in_mw > 0 {
+            let w_in = dev.power.power_in_mw / 1000;
+            writeln!(w, "  {DIM}• {RESET}Charging in: {w_in}W")?;
+        }
+        if dev.power.power_out_mw > 0 {
+            let w_out = dev.power.power_out_mw / 1000;
+            writeln!(w, "  {DIM}• {RESET}Sourcing out: {w_out}W")?;
+        }
+        for (key, value) in &dev.properties {
+            // `usb_power_ma` is shown in mA — the daemon emits the raw
+            // descriptor value, so don't multiply.
+            writeln!(w, "  {DIM}• {RESET}{}: {value}", property_label(key))?;
         }
         if let Some(diag) = &dev.charging_diag {
             if diag.is_warning {
@@ -145,8 +200,16 @@ fn print_typec_summary<W: Write>(w: &mut W, dev: &DeviceSummary) -> io::Result<(
     if !dev.subtitle.is_empty() {
         writeln!(w, "  {}", dev.subtitle)?;
     }
-    for b in &dev.bullets {
-        writeln!(w, "  {DIM}• {RESET}{b}")?;
+    if dev.power.power_in_mw > 0 {
+        let w_in = dev.power.power_in_mw / 1000;
+        writeln!(w, "  {DIM}• {RESET}Charging in: {w_in}W")?;
+    }
+    if dev.power.power_out_mw > 0 {
+        let w_out = dev.power.power_out_mw / 1000;
+        writeln!(w, "  {DIM}• {RESET}Sourcing out: {w_out}W")?;
+    }
+    for (key, value) in &dev.properties {
+        writeln!(w, "  {DIM}• {RESET}{}: {value}", property_label(key))?;
     }
     Ok(())
 }
@@ -287,12 +350,54 @@ pub(crate) fn device_json(dev: &DeviceSummary, show_raw: bool) -> Value {
     };
     let mut obj = Map::new();
     obj.insert("category".into(), Value::String(category.into()));
+    obj.insert(
+        "deviceClass".into(),
+        Value::String(format!("{:?}", dev.device_class)),
+    );
+    obj.insert(
+        "deviceSubclass".into(),
+        Value::String(dev.device_subclass.clone()),
+    );
+    obj.insert("status".into(), Value::String(format!("{:?}", dev.status)));
     obj.insert("headline".into(), Value::String(dev.headline.clone()));
     obj.insert("subtitle".into(), Value::String(dev.subtitle.clone()));
     obj.insert("icon".into(), Value::String(dev.icon.clone()));
+    obj.insert("vendor".into(), Value::String(dev.vendor.clone()));
+    obj.insert("product".into(), Value::String(dev.product.clone()));
+    obj.insert("vendorId".into(), Value::String(hex_vidpid(dev.vendor_id)));
     obj.insert(
-        "bullets".into(),
-        Value::Array(dev.bullets.iter().cloned().map(Value::String).collect()),
+        "productId".into(),
+        Value::String(hex_vidpid(dev.product_id)),
+    );
+    obj.insert(
+        "primaryDriver".into(),
+        Value::String(dev.primary_driver.clone()),
+    );
+    obj.insert(
+        "linkSpeedMbps".into(),
+        Value::Number(dev.link_speed_mbps.into()),
+    );
+    obj.insert("usbVersion".into(), Value::String(dev.usb_version.clone()));
+    obj.insert(
+        "power".into(),
+        json!({
+            "powerInMW": dev.power.power_in_mw,
+            "powerOutMW": dev.power.power_out_mw,
+            "powerRole": format!("{:?}", dev.power.power_role),
+        }),
+    );
+    // Properties: array of [key, value] tuples — mirrors the D-Bus a(ss)
+    // wire shape so jq users can use the same key vocabulary.
+    obj.insert(
+        "properties".into(),
+        Value::Array(
+            dev.properties
+                .iter()
+                .map(|(k, v)| {
+                    Value::Array(vec![Value::String(k.clone()), Value::String(v.clone())])
+                })
+                .collect(),
+        ),
     );
 
     if let Some(u) = &dev.usb_device {

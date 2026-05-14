@@ -108,7 +108,7 @@ fn enumerates_root_hub_with_keyboard_and_storage() {
         .unwrap();
     assert!(kb.subtitle.contains("Logitech"));
     assert!(kb.subtitle.contains("HID"));
-    assert!(kb.bullets.iter().any(|b| b == "Drivers: usbhid"));
+    assert_eq!(kb.primary_driver, "usbhid");
 
     let storage = snap
         .summaries
@@ -117,7 +117,10 @@ fn enumerates_root_hub_with_keyboard_and_storage() {
         .unwrap();
     assert!(storage.subtitle.contains("Kingston"));
     assert!(storage.subtitle.contains("Mass Storage"));
-    assert!(storage.bullets.iter().any(|b| b == "Serial: ABCD1234"));
+    assert!(storage
+        .properties
+        .iter()
+        .any(|(k, v)| k == "serial" && v == "ABCD1234"));
 }
 
 #[test]

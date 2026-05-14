@@ -30,8 +30,14 @@ fn main() {
         if !s.subtitle.is_empty() {
             println!("    {}", s.subtitle);
         }
-        for b in &s.bullets {
-            println!("    - {b}");
+        if s.link_speed_mbps > 0 {
+            println!("    - link speed: {} Mbps", s.link_speed_mbps);
+        }
+        if !s.usb_version.is_empty() {
+            println!("    - USB {}", s.usb_version);
+        }
+        for (k, v) in &s.properties {
+            println!("    - {k}: {v}");
         }
         if let Some(d) = &s.charging_diag {
             println!("    diagnostic: {} ({:?})", d.summary, d.bottleneck);

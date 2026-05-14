@@ -5,6 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed (breaking — D-Bus interface + lib API + CLI JSON output)
+
+**D-Bus interface bumped `org.usbeehive.Devices1` → `org.usbeehive.Devices2`,
+hard cut, no alias.** `BUS_NAME` (`org.usbeehive.Devices`) and
+`OBJECT_PATH` (`/org/usbeehive/Devices`) unchanged. The interface
+restructures the per-entry payload from prose `bullets` (the strings
+displayed in `usbeehive`'s terminal output) into structured top-level
+fields plus a `properties: a(ss)` bag of `(machine_key, value)` pairs.
+The lib type [`DeviceSummary`] and the CLI's `--json` output mirror
+the same structural shape — three surfaces, one source of truth.
+
+The English display vocabulary for terminal rendering moves from
+`src/summary.rs` (data layer) to `src/output.rs` (CLI renderer).
+Clients consuming the wire / JSON receive machine keys only; they own
+their translation table.
+
+#### Wire / lib type changes
+
+- `DeviceSummary.bullets: Vec<String>` is **gone**. Replaced by
+  `DeviceSummary.properties: Vec<(String, String)>` with machine keys.
+- New top-level fields on `DeviceSummary` and `DeviceEntry`:
+  `device_class`, `device_subclass`, `link_speed_mbps`, `usb_version`,
+  `power`, `vendor`, `product`, `vendor_id`, `product_id`,
+  `primary_driver`.
+- New `Status::Sourcing` variant — fires when the host is sourcing PD
+  power out through a Type-C port (e.g. charging a phone).
+- New `DeviceClass` enum: `Keyboard | Mouse | InputTablet | Gamepad |
+  Storage | Display | Audio | Camera | VideoCapture | Printer | Phone
+  | Hub | NetworkWired | NetworkWireless | SecurityKey |
+  SmartcardReader | Bluetooth | Serial | Unknown`. `device_class` is
+  `Unknown` for `Category::TypeCPort` (Type-C ports don't get a class).
+- New `PowerSummary` / `PowerRole` types. `power_role` reflects the
+  current contract direction (`Source` / `Sink`) when one exists,
+  falling back to `DualRole` for dual-role-capable ports with no
+  active contract, or `Unknown` for non-PD entries.
+- `Diagnose(port)` return type is now `(present: b, bottleneck: s,
+  summary: s, detail: s, is_warning: b)` — the leading `present` bool
+  unambiguously distinguishes "no diagnostic computed" from
+  "`bottleneck: Fine`".
+
+#### Regex → structured field migration
+
+For clients (USBee, dbus-monitor scripts) currently parsing prose
+bullets:
+
+| Today's regex / heuristic                            | Replaced by                          |
+|---|---|
+| `WATT_RE` (`/(\d+(?:\.\d+)?)\s*W\b/`)                | `power.power_in_mw` / `power_out_mw` |
+| `DIRECTION_RE` (`/\b(sink\|source)\b/`)              | `power.power_role`                   |
+| `USB_VERSION_RE` (`/\bUSB\s+\d…/`)                   | `usb_version`                        |
+| `SPEED_RE` (`/(\d+(?:\.\d+)?)\s*(Gb\|Mb\|Kb)\/s/`)   | `link_speed_mbps`                    |
+| substring scan `limited to` / `swap` / `degraded`    | `charging_diag.is_warning`           |
+| per-bullet label-classifier regex                    | `properties[i].0` (machine key)      |
+| headline substring → icon                            | `device_class` enum + `icon` string  |
+
+#### Bullet text → property key migration
+
+| Old bullet prose                       | New property key (`a(ss)` first column) |
+|---|---|
+| `Serial: ABC123`                       | `serial`                                |
+| `Removable` / `Built-in`               | `mount` (value `removable` / `fixed`)   |
+| `Drivers: usbhid, btusb`               | `drivers` (only when 2+ drivers); single driver moves to top-level `primary_driver` |
+| `VID:PID 05ac:12a8`                    | top-level `vendor_id`, `product_id` (uint16) |
+| `Data: host`                           | `data_role`                             |
+| `Power mode: …`                        | `power_mode`                            |
+| `PD revision: 3.0`                     | `pd_revision`                           |
+| `Plug orientation: normal`             | `plug_orientation`                      |
+| `Negotiated power: 20.0V @ 5.00A — 100W` | `pd_contract` (voltage/current); watts via `power.power_in_mw` |
+| `Cable speed: USB 3.2 Gen 2`           | `cable_speed`                           |
+| `Cable current: 5A`                    | `cable_current`                         |
+| `Cable max power: 100W`                | `cable_max_power`                       |
+| `Active cable` / `Passive cable`       | `cable_type` (value `active` / `passive`) |
+| `Cable vendor: Realtek`                | `cable_vendor`                          |
+| `Charger max: 100W`                    | `charger_max`                           |
+| `Power: 500 mA` (USB bus-powered draw) | `usb_power_ma` (raw mA, voltage assumed 5 V) |
+
+#### Enum extensibility convention
+
+Adding a new variant to `DeviceClass` / `Status` / `PowerRole` /
+`Bottleneck` (or any future enum on the wire) is a **non-breaking
+change**. Clients MUST treat any unrecognized string as `Unknown` and
+fall back to category-based behaviour. Removing or renaming variants
+requires an interface bump.
+
+Property keys follow the same rule — adding new keys is additive
+(non-breaking); renaming or removing requires an interface bump.
+
+#### `device_class` classification fidelity (day-one)
+
+| Class               | Signal                                                          |
+|---|---|
+| `Keyboard` / `Mouse` | HID interface (class `0x03`) protocol `0x01` / `0x02`           |
+| `Storage`           | Mass Storage interface (class `0x08`)                            |
+| `Audio` / `Camera` / `VideoCapture` / `Printer` / `SmartcardReader` | matching interface base class |
+| `Bluetooth`         | Wireless (`0xE0`) subclass `0x01` protocol `0x01`                |
+| `NetworkWired` / `Serial` | CDC subclass (`0x06`/`0x02`) **or** known driver name allowlist |
+| `Phone`             | Apple iPhone (VID + product); Android product string             |
+| `SecurityKey`       | Yubico/Nitrokey VID, or product match (`yubikey`, `fido`, …)    |
+| `Hub`               | `device_class == 0x09`                                          |
+| `Gamepad` / `InputTablet` | HID + product-string heuristic                            |
+| `Unknown`           | fallthrough — additive granularity later via new variants        |
+
+#### USBee migration
+
+The USBee GNOME extension will land its Devices2 port in lockstep
+with this release. Replace the `Devices1` proxy interface name with
+`Devices2` and drop every regex listed above in favor of the
+structured fields. Property labels go through USBee's `_()` gettext —
+the daemon-emitted machine keys are the binding layer, not the
+display strings.
+
 ## [0.5.1] - 2026-05-09
 
 Lint-only patch release. No behavior, API, or D-Bus interface changes.
