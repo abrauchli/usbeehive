@@ -35,6 +35,46 @@ fn property_label(key: &str) -> String {
     }
 }
 
+/// Display label for boolean-flag properties (the `transport.*` family
+/// and the `cable.trust.*` family), or `None` for value-bearing keys.
+///
+/// Flag keys are only present in the bag when their condition fires —
+/// absence means "off", presence means "on" — so the renderer prints
+/// just the label, not `key: true`.
+fn property_flag_label(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "transport.usb2" => "USB 2.0 link",
+        "transport.usb3" => "USB 3.x link",
+        "transport.usb4" => "USB4 link",
+        "transport.dp_altmode" => "DisplayPort altmode",
+        "transport.tb" => "Thunderbolt 3 altmode",
+        "cable.trust.zero_vid" => "Cable trust: zero VID (likely counterfeit)",
+        "cable.trust.vid_unknown" => "Cable trust: unknown VID",
+        "cable.trust.reserved_bits" => "Cable trust: reserved bits set",
+        _ => return None,
+    })
+}
+
+/// Render one property as a bullet line, handling both flag-style
+/// (`{label}` when value == "true") and value-bearing (`{label}: {value}`).
+fn write_property<W: Write>(w: &mut W, key: &str, value: &str) -> io::Result<()> {
+    if let Some(label) = property_flag_label(key) {
+        if value == "true" {
+            // Cable-trust flags are warnings; colour them yellow so they
+            // stand out against the routine transport / link bullets.
+            let color = if key.starts_with("cable.trust.") {
+                YELLOW
+            } else {
+                ""
+            };
+            return writeln!(w, "  {DIM}• {RESET}{color}{label}{RESET}");
+        }
+        // Unexpected non-"true" value on a flag key — fall through to
+        // the raw renderer so we don't silently swallow the data.
+    }
+    writeln!(w, "  {DIM}• {RESET}{}: {value}", property_label(key))
+}
+
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
 const DIM: &str = "\x1b[2m";
@@ -101,7 +141,7 @@ fn print_text_iter<W: Write>(
         for (key, value) in &dev.properties {
             // `usb_power_ma` is shown in mA — the daemon emits the raw
             // descriptor value, so don't multiply.
-            writeln!(w, "  {DIM}• {RESET}{}: {value}", property_label(key))?;
+            write_property(w, key, value)?;
         }
         if let Some(diag) = &dev.charging_diag {
             if diag.is_warning {
@@ -209,7 +249,7 @@ fn print_typec_summary<W: Write>(w: &mut W, dev: &DeviceSummary) -> io::Result<(
         writeln!(w, "  {DIM}• {RESET}Sourcing out: {w_out}W")?;
     }
     for (key, value) in &dev.properties {
-        writeln!(w, "  {DIM}• {RESET}{}: {value}", property_label(key))?;
+        write_property(w, key, value)?;
     }
     Ok(())
 }
@@ -545,6 +585,52 @@ mod tests {
         let mut buf = Vec::new();
         print_text_iter(&mut buf, &[], false).unwrap();
         assert!(String::from_utf8_lossy(&buf).contains("No USB devices found."));
+    }
+
+    fn render_property_string(key: &str, value: &str) -> String {
+        let mut buf = Vec::new();
+        write_property(&mut buf, key, value).unwrap();
+        String::from_utf8(buf).unwrap()
+    }
+
+    #[test]
+    fn flag_properties_render_label_only_when_true() {
+        // `transport.*` and `cable.trust.*` are boolean flags — the
+        // renderer should drop the trailing ": true".
+        let out = render_property_string("transport.usb4", "true");
+        assert!(out.contains("USB4 link"), "{out}");
+        assert!(!out.contains("true"), "{out}");
+
+        let out = render_property_string("transport.dp_altmode", "true");
+        assert!(out.contains("DisplayPort altmode"), "{out}");
+
+        let out = render_property_string("cable.trust.zero_vid", "true");
+        assert!(out.contains("zero VID"), "{out}");
+        // Trust flags carry the YELLOW warning colour code.
+        assert!(out.contains(YELLOW), "{out}");
+    }
+
+    #[test]
+    fn value_bearing_properties_keep_colon_format() {
+        let out = render_property_string("charger_max", "100W");
+        assert!(out.contains("Charger max: 100W"), "{out}");
+
+        let out = render_property_string("cable_speed", "USB 3.2 Gen 2");
+        assert!(out.contains("Cable speed: USB 3.2 Gen 2"), "{out}");
+    }
+
+    #[test]
+    fn unknown_property_falls_through_to_raw_key() {
+        let out = render_property_string("future.unknown.key", "42");
+        assert!(out.contains("future.unknown.key: 42"), "{out}");
+    }
+
+    #[test]
+    fn flag_property_with_non_true_value_falls_through() {
+        // Defensive: if the daemon ever emits a non-"true" value on a flag
+        // key, we should print it raw rather than silently dropping data.
+        let out = render_property_string("transport.usb4", "partial");
+        assert!(out.contains("transport.usb4: partial"), "{out}");
     }
 
     #[test]
