@@ -125,6 +125,44 @@ impl From<&PowerSummary> for PowerEntry {
     }
 }
 
+/// One PDO advertised by a USB-PD source.
+///
+/// Wire mirror of [`crate::power::PowerDataObject`]. The `kind` enum is
+/// flattened to its label string (`"Fixed"`, `"Battery"`, `"Variable"`,
+/// `"PPS"`, `"Unknown"`) for dbus-monitor friendliness.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+pub struct PdoEntry {
+    /// PDO index in the source capabilities array (1-based as published
+    /// by the kernel under `source-capabilities/<n>:<kind>/`).
+    pub index: u32,
+    /// PDO kind label (`"Fixed"` | `"Battery"` | `"Variable"` | `"PPS"`).
+    pub kind: String,
+    /// Voltage in millivolts (minimum voltage for PPS / variable).
+    pub voltage_mv: u32,
+    /// Maximum voltage in millivolts. Zero for fixed supplies.
+    pub max_voltage_mv: u32,
+    /// Maximum current in milliamps.
+    pub current_ma: u32,
+    /// Maximum power in milliwatts.
+    pub power_mw: u32,
+    /// `true` when this PDO is the currently negotiated contract.
+    pub is_active: bool,
+}
+
+impl From<&crate::power::PowerDataObject> for PdoEntry {
+    fn from(p: &crate::power::PowerDataObject) -> Self {
+        PdoEntry {
+            index: p.index,
+            kind: p.r#type.label().to_string(),
+            voltage_mv: p.voltage_mv,
+            max_voltage_mv: p.max_voltage_mv,
+            current_ma: p.current_ma,
+            power_mw: p.power_mw,
+            is_active: p.is_active,
+        }
+    }
+}
+
 /// Per-entry charging diagnostic. Same shape as `Diagnose(port)`.
 ///
 /// `present == false` indicates the port has no diagnostic to report
@@ -204,11 +242,30 @@ pub struct DeviceEntry {
     pub power: PowerEntry,
     /// Charging diagnostic. `present == false` on every non-`Charging` entry.
     pub charging_diag: DiagnosticEntry,
+    /// Source PDOs advertised by the attached PD partner. Empty for entries
+    /// without a companion `PowerDeliveryPort`.
+    pub pdo_list: Vec<PdoEntry>,
+    /// Index of the active PDO in `pdo_list`, or `-1` when no contract is
+    /// negotiated (or no PDOs are present).
+    pub active_pdo_index: i32,
 }
 
 impl From<&DeviceSummary> for DeviceEntry {
     fn from(s: &DeviceSummary) -> Self {
         let port_number = s.typec_port.as_ref().map(|p| p.port_number).unwrap_or(-1);
+        let (pdo_list, active_pdo_index) = match s.power_delivery.as_ref() {
+            Some(pd) => {
+                let list: Vec<PdoEntry> =
+                    pd.source_capabilities.iter().map(PdoEntry::from).collect();
+                let active = list
+                    .iter()
+                    .position(|p| p.is_active)
+                    .map(|i| i as i32)
+                    .unwrap_or(-1);
+                (list, active)
+            }
+            None => (Vec::new(), -1),
+        };
         DeviceEntry {
             id: s.id(),
             category: format!("{:?}", s.category),
@@ -229,6 +286,8 @@ impl From<&DeviceSummary> for DeviceEntry {
             usb_version: s.usb_version.clone(),
             power: PowerEntry::from(&s.power),
             charging_diag: DiagnosticEntry::from(s.charging_diag.as_ref()),
+            pdo_list,
+            active_pdo_index,
         }
     }
 }
