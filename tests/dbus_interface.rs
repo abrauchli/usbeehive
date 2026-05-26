@@ -110,10 +110,12 @@ mod dbus_tests {
         assert!(!p.iter().any(|(k, _)| k.starts_with("Charger")));
 
         // Structured PDO list — the cable-limit fixture publishes a 20V/5A
-        // /100W fixed source PDO. The active-PDO inference from sysfs is a
-        // separate enhancement, so `active_pdo_index` may be `-1` against
-        // the fixture today; the shape and values are what we assert here.
+        // /100W fixed source PDO. Active-PDO inference needs a UCSI live
+        // voltage to cross-reference against; this fixture omits the
+        // `ucsi-source-psy-*` entry, so `active_pdo_index` is `-1` here
+        // even though the shape and values are populated correctly.
         assert!(!port.pdo_list.is_empty(), "pdo_list should be populated");
+        assert_eq!(port.active_pdo_index, -1);
         let pdo = &port.pdo_list[0];
         assert_eq!(pdo.kind, "Fixed");
         assert_eq!(pdo.voltage_mv, 20_000);

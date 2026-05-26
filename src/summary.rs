@@ -774,6 +774,23 @@ impl DeviceSummary {
             }
         }
 
+        // Infer the active PDO from the live UCSI voltage. sysfs only
+        // publishes which PDOs are *advertised*, not which one is
+        // contracted — so without this pass `is_active` is always `false`
+        // against real hardware and `active_pdo_index` resolves to `-1`.
+        if let (Some(pd_port), Some(psy)) =
+            (s.power_delivery.as_mut(), port.power_supply.as_ref())
+        {
+            if psy.online {
+                if let Some(uv) = psy.voltage_now_uv {
+                    if uv > 0 {
+                        let live_mv = (uv / 1000) as u32;
+                        pd_port.infer_active_source_pdo(live_mv);
+                    }
+                }
+            }
+        }
+
         // PD source advertisement → sinking power (we're being charged).
         let mut sink_power_mw: u32 = 0;
         let mut source_power_mw: u32 = 0;
@@ -1235,6 +1252,89 @@ mod tests {
         let label = power_contract_string(&psy).unwrap();
         assert!(label.contains("9.0V"));
         assert!(label.contains("2.00A"));
+    }
+
+    #[test]
+    fn active_pdo_inferred_from_live_ucsi_voltage() {
+        // Real-hardware path: sysfs publishes every advertised PDO with
+        // is_active=false. The UCSI live voltage_now reading tells us which
+        // one is contracted — summary builder must cross-reference and
+        // populate is_active so the wire's active_pdo_index resolves.
+        use crate::power::{PdoType, PowerDataObject};
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            power_supply: Some(TypeCPowerSupply {
+                online: true,
+                voltage_now_uv: Some(20_000_000), // 20.0V live
+                current_now_ua: Some(4_500_000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![
+                PowerDataObject {
+                    r#type: PdoType::FixedSupply,
+                    voltage_mv: 5_000,
+                    current_ma: 3_000,
+                    power_mw: 15_000,
+                    is_active: false,
+                    index: 1,
+                    ..Default::default()
+                },
+                PowerDataObject {
+                    r#type: PdoType::FixedSupply,
+                    voltage_mv: 9_000,
+                    current_ma: 3_000,
+                    power_mw: 27_000,
+                    is_active: false,
+                    index: 2,
+                    ..Default::default()
+                },
+                PowerDataObject {
+                    r#type: PdoType::FixedSupply,
+                    voltage_mv: 20_000,
+                    current_ma: 5_000,
+                    power_mw: 100_000,
+                    is_active: false,
+                    index: 3,
+                    ..Default::default()
+                },
+            ],
+            max_source_power_mw: 100_000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        let pd_out = s.power_delivery.as_ref().unwrap();
+        assert!(!pd_out.source_capabilities[0].is_active);
+        assert!(!pd_out.source_capabilities[1].is_active);
+        assert!(pd_out.source_capabilities[2].is_active, "20V PDO should be active");
+        assert_eq!(pd_out.active_source_pdo_index, Some(3));
+    }
+
+    #[test]
+    fn active_pdo_inference_skipped_when_no_power_supply() {
+        // No UCSI psy → can't infer; is_active stays as advertised. (Tests
+        // that use explicit is_active=true still work.)
+        use crate::power::{PdoType, PowerDataObject};
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            power_supply: None,
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![PowerDataObject {
+                r#type: PdoType::FixedSupply,
+                voltage_mv: 5_000,
+                is_active: false,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        assert!(!s.power_delivery.as_ref().unwrap().source_capabilities[0].is_active);
     }
 
     #[test]
