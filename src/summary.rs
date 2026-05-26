@@ -734,6 +734,20 @@ impl DeviceSummary {
                 s.properties
                     .push(("cable_vendor".into(), c.vendor_name.clone()));
             }
+            // Trust signals: push only the flags that fire — UI consumers
+            // render badges per key, clean cables stay quiet.
+            if c.trust.zero_vid {
+                s.properties
+                    .push(("cable.trust.zero_vid".into(), "true".into()));
+            }
+            if c.trust.vid_unknown {
+                s.properties
+                    .push(("cable.trust.vid_unknown".into(), "true".into()));
+            }
+            if c.trust.reserved_bits_set {
+                s.properties
+                    .push(("cable.trust.reserved_bits".into(), "true".into()));
+            }
         }
 
         // PD source advertisement → sinking power (we're being charged).

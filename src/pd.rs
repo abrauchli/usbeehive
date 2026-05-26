@@ -200,6 +200,23 @@ pub fn decode_id_header(vdo: u32) -> IdHeaderVdo {
     }
 }
 
+/// `true` when the raw Cable VDO sets bits that USB-PD R3.x defines as
+/// reserved — a soft trust signal that the e-marker either is buggy or
+/// reuses a counterfeit reference design.
+///
+/// Conservative mask: only the bits that are reserved across the entire
+/// PD 3.x lifetime of the cable VDO layout. Specifically:
+///
+/// - Bit 3 — reserved in both passive and active cable VDOs.
+/// - Bits 7..8 — reserved in passive cable VDOs (used for SBU support in
+///   active cables; only checked when `is_active` is `false`).
+///
+/// Caller passes the same `is_active` flag used with [`decode_cable_vdo`].
+pub fn cable_vdo_reserved_bits_set(vdo: u32, is_active: bool) -> bool {
+    let mask: u32 = if is_active { 0x0000_0008 } else { 0x0000_0188 };
+    vdo & mask != 0
+}
+
 /// Decode a Cable VDO.
 ///
 /// `is_active` should be set from the partner's reported product type — the
@@ -293,6 +310,25 @@ mod tests {
         assert_eq!(v.max_vbus_volts, 50);
         assert_eq!(v.max_watts, 250);
         assert!(v.is_active);
+    }
+
+    #[test]
+    fn reserved_bits_passive_detect() {
+        // Passive cable: bit 3 is reserved.
+        assert!(cable_vdo_reserved_bits_set(0b1000, false));
+        // Bit 7 reserved in passive.
+        assert!(cable_vdo_reserved_bits_set(1 << 7, false));
+        // A well-formed passive cable VDO (Gen2, 5A, 50V) sets none of them.
+        let clean = 2u32 | (2 << 5) | (3 << 9);
+        assert!(!cable_vdo_reserved_bits_set(clean, false));
+    }
+
+    #[test]
+    fn reserved_bits_active_only_bit_3() {
+        // Bit 3 still reserved in active.
+        assert!(cable_vdo_reserved_bits_set(0b1000, true));
+        // Bit 7 is *not* reserved in active (SBU). Must not fire.
+        assert!(!cable_vdo_reserved_bits_set(1 << 7, true));
     }
 
     #[test]

@@ -8,9 +8,38 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::pd::{decode_cable_vdo, decode_id_header, CableCurrent, CableSpeed, ProductType};
+use crate::pd::{
+    cable_vdo_reserved_bits_set, decode_cable_vdo, decode_id_header, CableCurrent, CableSpeed,
+    ProductType,
+};
 use crate::typec::TypeCCable;
 use crate::vendor;
+
+/// Cable trust signals.
+///
+/// Three heuristics that, taken together, hint at a counterfeit or buggy
+/// e-marker. None is conclusive — UI consumers should render these with a
+/// hedged tone (e.g. *"this cable's identity looks unusual"*).
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+pub struct CableTrust {
+    /// `true` when the cable's ID Header VDO reports a vendor ID of zero.
+    /// USB-IF certified e-markers always carry a registered VID.
+    pub zero_vid: bool,
+    /// `true` when the vendor ID is non-zero but isn't in the bundled
+    /// USB-IF vendor database (i.e. [`vendor::lookup`] fell back to a hex
+    /// string).
+    pub vid_unknown: bool,
+    /// `true` when the raw Cable VDO sets bits that USB-PD R3.x defines
+    /// as reserved (see [`cable_vdo_reserved_bits_set`]).
+    pub reserved_bits_set: bool,
+}
+
+impl CableTrust {
+    /// `true` when any of the three heuristics fire.
+    pub fn any(&self) -> bool {
+        self.zero_vid || self.vid_unknown || self.reserved_bits_set
+    }
+}
 
 /// Decoded view of a cable's e-marker.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -36,6 +65,9 @@ pub struct CableInfo {
     /// Friendly vendor name (or hex fallback) for `vendor_id`.
     pub vendor_name: String,
 
+    /// Trust signals derived from the cable's e-marker. See [`CableTrust`].
+    pub trust: CableTrust,
+
     /// Raw sysfs attributes captured for `--raw` rendering.
     pub raw_attributes: BTreeMap<String, String>,
 }
@@ -60,6 +92,9 @@ impl CableInfo {
         };
         info.vendor_id = id.vendor_id;
         info.vendor_name = vendor::lookup(id.vendor_id);
+        info.trust.zero_vid = id.vendor_id == 0;
+        info.trust.vid_unknown =
+            id.vendor_id != 0 && vendor::is_hex_fallback(&info.vendor_name);
         let Some(&first) = id.vdos.first() else {
             return info;
         };
@@ -72,6 +107,7 @@ impl CableInfo {
             info.max_watts = v.max_watts;
             info.is_active = v.is_active;
             info.is_passive = !v.is_active;
+            info.trust.reserved_bits_set = cable_vdo_reserved_bits_set(fourth, active);
         }
         info
     }
@@ -139,6 +175,61 @@ mod tests {
         assert!(info.is_passive);
         assert!(!info.is_active);
         assert_eq!(info.vendor_name, "Realtek");
+    }
+
+    #[test]
+    fn trust_zero_vid_fires_on_blank_emarker() {
+        let cable = TypeCCable {
+            r#type: "passive".into(),
+            plug_type: String::new(),
+            identity: Some(id(vec![3u32 << 27, 0, 0, 1], 0)),
+            raw_attributes: BTreeMap::new(),
+        };
+        let info = CableInfo::from_typec_cable(&cable);
+        assert!(info.trust.zero_vid);
+        assert!(!info.trust.vid_unknown);
+    }
+
+    #[test]
+    fn trust_vid_unknown_fires_on_hex_fallback() {
+        // 0xDEAD isn't in the bundled vendor DB — lookup falls back to a
+        // hex string and vid_unknown fires.
+        let cable = TypeCCable {
+            r#type: "passive".into(),
+            plug_type: String::new(),
+            identity: Some(id(vec![3u32 << 27, 0, 0, 1], 0xDEAD)),
+            raw_attributes: BTreeMap::new(),
+        };
+        let info = CableInfo::from_typec_cable(&cable);
+        assert!(!info.trust.zero_vid);
+        assert!(info.trust.vid_unknown);
+    }
+
+    #[test]
+    fn trust_reserved_bits_fires_on_dirty_vdo() {
+        let dirty = 1u32 | (1 << 5) | (1 << 3); // bit 3 is reserved
+        let cable = TypeCCable {
+            r#type: "passive".into(),
+            plug_type: String::new(),
+            identity: Some(id(vec![3u32 << 27, 0, 0, dirty], 0x05AC)),
+            raw_attributes: BTreeMap::new(),
+        };
+        let info = CableInfo::from_typec_cable(&cable);
+        assert!(info.trust.reserved_bits_set);
+        assert!(!info.trust.vid_unknown); // Apple is in the vendor DB
+    }
+
+    #[test]
+    fn trust_clean_cable_fires_nothing() {
+        let clean = 2u32 | (2 << 5) | (3 << 9);
+        let cable = TypeCCable {
+            r#type: "passive".into(),
+            plug_type: String::new(),
+            identity: Some(id(vec![3u32 << 27, 0, 0, clean], 0x05AC)),
+            raw_attributes: BTreeMap::new(),
+        };
+        let info = CableInfo::from_typec_cable(&cable);
+        assert!(!info.trust.any());
     }
 
     #[test]
