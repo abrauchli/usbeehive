@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-05-26
+
+### Added
+
+- **USB4 detection — `transport.usb4` machine-keyed property.** USB4 is
+  not an altmode; it's negotiated at the USB-PD enter-mode layer and only
+  surfaces through the `thunderbolt` subsystem. New
+  `/sys/bus/thunderbolt/devices/` reader detects USB4-capable links and
+  emits `transport.usb4=true` on Type-C ports with a partner when the
+  system has both a USB4-capable host adapter (`generation >= 4`) and an
+  attached USB4-capable router. TBT3-only docks under a USB4 host
+  correctly stay silent.
+- New `thunderbolt::ThunderboltRouter` plain-data type (`route`, `domain`,
+  `is_host`, `generation`, vendor/device IDs and names, `unique_id`).
+- New `Sysfs::thunderbolt_routers()` enumerator and
+  `Sysfs::thunderbolt_dir()` helper.
+- `Snapshot.thunderbolt_routers` field; `DeviceManager` exposes
+  `thunderbolt_routers()` accessor.
+- **Active PDO inference from live UCSI voltage.** `PowerDeliveryPort`
+  gains `infer_active_source_pdo(live_mv)` which marks the source PDO
+  matching the contracted voltage (fixed/battery within 500 mV
+  tolerance; PPS/Variable by range). `summary::from_typec_port` invokes
+  it when a UCSI psy is online and reports `voltage_now`, so the wire's
+  `active_pdo_index` now resolves against real hardware instead of
+  always returning `-1`.
+
+### Changed (breaking — library API)
+
+- `sysfs::manager::build_summaries` signature extended with a fourth
+  `&[ThunderboltRouter]` argument carrying the Thunderbolt / USB4 router
+  list. Pass `&[]` if you don't have the data.
+
+D-Bus interface name is unchanged (`org.usbeehive.Devices3`). The two
+new keys (`transport.usb4`, populated `active_pdo_index`) are additive
+on the existing wire — clients that ignore unknown property keys are
+unaffected.
+
 ## [0.7.0] - 2026-05-26
 
 ### Changed (breaking — D-Bus interface)
