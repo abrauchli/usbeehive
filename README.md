@@ -99,7 +99,7 @@ consumers pull in only what they need.
 | `sysfs` | yes | `Sysfs` handle + `DeviceManager` — Linux `/sys` enumeration with injectable root. |
 | `watch` | yes | libudev hotplug monitor: `watch::Watcher` + `watch::run_loop`. |
 | `cli` | yes | The `usbeehive` binary (clap + JSON / text rendering). |
-| `dbus` | no | `usbeehive::dbus` interface module + the `usbeehived` daemon binary publishing `org.usbeehive.Devices2` on the session bus (implies `watch`). |
+| `dbus` | no | `usbeehive::dbus` interface module + the `usbeehived` daemon binary publishing `org.usbeehive.Devices3` on the session bus (implies `watch`). |
 
 Library-only consumers can drop the binary deps:
 
@@ -166,14 +166,14 @@ cargo build --release --no-default-features --features dbus
 ./target/release/usbeehived                                # foreground
 ```
 
-Wire surface — `org.usbeehive.Devices2` at `/org/usbeehive/Devices`:
+Wire surface — `org.usbeehive.Devices3` at `/org/usbeehive/Devices`:
 
-Each `ListDevices` entry is a 19-field tuple:
-`(id, category, device_class, device_subclass, status, headline, subtitle, icon, vendor, product, vendor_id, product_id, primary_driver, properties, port_number, link_speed_mbps, usb_version, power, charging_diag)`. See [`src/dbus.rs`](src/dbus.rs) module docs for per-field semantics.
+Each `ListDevices` entry is a 21-field tuple:
+`(id, category, device_class, device_subclass, status, headline, subtitle, icon, vendor, product, vendor_id, product_id, primary_driver, properties, port_number, link_speed_mbps, usb_version, power, charging_diag, pdo_list, active_pdo_index)`. See [`src/dbus.rs`](src/dbus.rs) module docs for per-field semantics.
 
 | Member | Kind | Notes |
 |---|---|---|
-| `ListDevices` | method `() → a(ssssssssssqqsa(ss)ius(uus)(bsssb))` | One structured entry per summary. Properties are `(machine_key, value)` pairs. |
+| `ListDevices` | method `() → a(ssssssssssqqsa(ss)ius(uus)(bsssb)a(usuuuub)i)` | One structured entry per summary. Properties are `(machine_key, value)` pairs; `pdo_list` is the structured source-PDO advertisement. |
 | `ListPorts` | method `() → ai` | Type-C `port_number`s currently exposed. |
 | `Diagnose` | method `(i) → (bsssb)` | Charging diagnostic for a port — same shape as the per-entry `charging_diag`. `present == false` when none available. |
 | `SnapshotJson` | method `() → s` | Full structured snapshot — same shape as `usbeehive --json`. |
@@ -187,19 +187,22 @@ Quick poke from the shell:
 ```sh
 gdbus call --session --dest org.usbeehive.Devices \
     --object-path /org/usbeehive/Devices \
-    --method org.usbeehive.Devices2.ListDevices
+    --method org.usbeehive.Devices3.ListDevices
 ```
 
 A minimal Rust client lives in [`examples/dbus_client.rs`](examples/dbus_client.rs).
 
-### Devices2 migration
+### Devices3 migration
 
-`Devices1` was retired in favor of `Devices2` — clients must update both
-the interface name and how they consume the per-entry payload. Adding
-new enum variants (`device_class`, `status`, `power_role`, `bottleneck`)
-is non-breaking; clients MUST treat any unrecognized string as
-`Unknown` / fall back to category-based behavior. The CHANGELOG has the
-full regex → field migration table.
+`Devices2` was retired in favor of `Devices3` — clients must update the
+interface name and append two trailing fields to the per-entry payload
+(`pdo_list`, `active_pdo_index`). Adding new enum variants
+(`device_class`, `status`, `power_role`, `bottleneck`) is non-breaking;
+clients MUST treat any unrecognized string as `Unknown` / fall back to
+category-based behavior. New machine-keyed properties
+(`cable.trust.*`, `transport.*`) are pushed only when their flag fires —
+absence is the "off" state. The CHANGELOG has the full break-by-break
+migration table.
 
 ## How it works
 

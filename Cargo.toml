@@ -1,6 +1,6 @@
 [package]
 name = "usbeehive"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 license = "MIT"
 authors = ["Andreas Brauchli"]
@@ -47,7 +47,7 @@ watch = ["dep:udev", "dep:libc", "sysfs"]
 # `cli` enables the `usbeehive` binary.
 cli = ["dep:serde_json", "dep:clap", "sysfs"]
 # `dbus` enables the `usbeehive::dbus` interface module and the `usbeehived`
-# binary that exposes `org.usbeehive.Devices2` on the session bus. Implies
+# binary that exposes `org.usbeehive.Devices3` on the session bus. Implies
 # `watch` (and therefore `sysfs`) so the daemon has a live snapshot.
 dbus = ["dep:zbus", "dep:serde_json", "watch"]
 

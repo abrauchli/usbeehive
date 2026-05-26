@@ -5,6 +5,77 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-05-26
+
+### Changed (breaking — D-Bus interface)
+
+**D-Bus interface bumped `org.usbeehive.Devices2` → `org.usbeehive.Devices3`,
+hard cut, no alias.** `BUS_NAME` (`org.usbeehive.Devices`) and
+`OBJECT_PATH` (`/org/usbeehive/Devices`) unchanged. The wire gains a
+structured PDO list and an active-PDO index. Three families of new
+machine-keyed properties are added on top: cable trust signals,
+active-transport flags. The GNOME extension port hadn't shipped against
+0.6.0 yet, so this is a coordinated break-and-bump rather than a
+deprecate-and-shim cycle.
+
+#### Wire changes
+
+- `ListDevices` element gains two trailing fields. Full per-entry signature
+  becomes
+  `a(ssssssssssqqsa(ss)ius(uus)(bsssb)a(usuuuub)i)`:
+  - `pdo_list: a(usuuuub)` — `(index, kind, voltage_mv, max_voltage_mv,
+    current_ma, power_mw, is_active)` per source PDO. Empty when the
+    entry has no companion `PowerDeliveryPort`.
+  - `active_pdo_index: i` — index into `pdo_list`, or `-1`.
+- New `PdoEntry` wire type mirrors `crate::power::PowerDataObject`.
+  `kind` is the label string (`"Fixed"` / `"Battery"` / `"Variable"` /
+  `"PPS"` / `"Unknown"`).
+- The legacy `charger_max` machine-key property is retained for back-compat;
+  the structured `pdo_list` is the source of truth for UI rendering of
+  charger PDO advertising.
+
+#### New machine-keyed properties (a(ss) bag)
+
+Pushed only when their flag fires — absence is the "off" state. Adding new
+keys is non-breaking; the migration table is exhaustive for what 0.7.0
+adds.
+
+- `cable.trust.zero_vid=true` — cable ID Header VDO reports `vendor_id == 0`.
+- `cable.trust.vid_unknown=true` — non-zero VID not in the bundled USB-IF
+  vendor DB.
+- `cable.trust.reserved_bits=true` — Cable VDO sets bits that USB-PD R3.x
+  defines as reserved (bit 3 always; bits 7-8 for passive cables only).
+- `transport.usb2=true` — UsbDevice with negotiated speed 1..=480 Mbps.
+- `transport.usb3=true` — UsbDevice with negotiated speed ≥ 5000 Mbps.
+- `transport.dp_altmode=true` — Type-C partner advertises SVID `0xFF01`
+  (VESA DisplayPort).
+- `transport.tb=true` — Type-C partner advertises SVID `0x8087`
+  (Intel Thunderbolt 3).
+
+#### Library type changes
+
+- `cable::CableInfo` gains `trust: CableTrust { zero_vid, vid_unknown,
+  reserved_bits_set }`. Populated once in `from_typec_cable`.
+- `typec::TypeCPartner` gains `altmodes: Vec<TypeCAltMode>` populated from
+  `port{N}-partner.{M}/` sibling altmode directories.
+- `pd::cable_vdo_reserved_bits_set(vdo, is_active)` — new helper.
+- `summary::is_phone()` signature changes to take an `&[UsbInterface]`
+  slice — the new heuristic stack inspects interface descriptors.
+
+### Fixed
+
+- **Android phone misclassification (Cat S61 + others).** `is_phone()`
+  previously only matched Apple+iphone or `product.contains("android")`,
+  so any handset whose iProduct is the model name fell through to the
+  inner CDC-ACM branch and got `DeviceClass::Serial` — surfaced as a
+  terminal icon in the GNOME extension. New signal stack:
+  1. ADB function signature `0xFF/0x42/0x01` (bullet-proof).
+  2. PTP `0x06/0x01/0x01` paired with any vendor-class (`0xFF`) interface.
+  3. `PHONE_VIDS` allowlist (Google, Samsung, Bullitt, Sony, OnePlus,
+     Xiaomi, Huawei, ZTE, HTC, LG, MediaTek, Meizu, Oppo, Qualcomm)
+     paired with PTP or vendor-class.
+  Pure PTP-only DSLRs (Canon, Nikon) stay classified as Camera/Unknown.
+
 ## [0.6.0] - 2026-05-13
 
 ### Changed (breaking — D-Bus interface + lib API + CLI JSON output)

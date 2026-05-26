@@ -68,7 +68,7 @@ mod dbus_tests {
 
     #[test]
     fn list_devices_carries_full_structured_fields() {
-        // Exercises every top-level structured field on the Devices2 wire
+        // Exercises every top-level structured field on the Devices3 wire
         // against the cable-limit fixture (60W cable + 100W charger).
         let root = TempRoot::new("dbus-structured");
         write_port_with_cable_limit(root.path());

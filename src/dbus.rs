@@ -7,7 +7,7 @@
 //! Optional D-Bus interface for `usbeehive`.
 //!
 //! Compiled only when the `dbus` Cargo feature is enabled. Hosts the
-//! `org.usbeehive.Devices2` interface backing the `usbeehived` daemon, plus
+//! `org.usbeehive.Devices3` interface backing the `usbeehived` daemon, plus
 //! the wire types ([`DeviceEntry`], [`PowerEntry`], [`DiagnosticEntry`])
 //! clients receive.
 //!
@@ -20,11 +20,12 @@
 //!
 //! Bus name: `org.usbeehive.Devices`
 //! Object path: `/org/usbeehive/Devices`
-//! Interface: `org.usbeehive.Devices2`
+//! Interface: `org.usbeehive.Devices3`
 //!
 //! ## `ListDevices` element shape
 //!
-//! Per-entry signature: `a(ssssssssss qq s a(ss) i u s (uus) (bsssb))`.
+//! Per-entry signature:
+//! `a(ssssssssss qq s a(ss) i u s (uus) (bsssb) a(usuuuub) i)`.
 //!
 //! | Pos | Field | Type | Notes |
 //! |---|---|---|---|
@@ -47,12 +48,14 @@
 //! | 17 | `usb_version` | `s` | Canonical short form (`"2.0"`, `"3.2"`, `"4.0"`). Empty if unknown. |
 //! | 18 | `power` | `(uus)` | `(power_in_mw, power_out_mw, power_role)`. `power_in_mw > 0` ⟺ port is actively sinking PD power. |
 //! | 19 | `charging_diag` | `(bsssb)` | `(present, bottleneck, summary, detail, is_warning)`. `present == false` on every non-`Charging` entry. |
+//! | 20 | `pdo_list` | `a(usuuuub)` | `(index, kind, voltage_mv, max_voltage_mv, current_ma, power_mw, is_active)` per source PDO. Empty for entries without a companion `PowerDeliveryPort`. |
+//! | 21 | `active_pdo_index` | `i` | Index into `pdo_list` of the active contract, or `-1`. |
 //!
 //! ## Methods, properties, signals
 //!
 //! | Member | Signature | Notes |
 //! |---|---|---|
-//! | `ListDevices` | `() → a(ssssssssssqqsa(ss)ius(uus)(bsssb))` | One [`DeviceEntry`] per summary. |
+//! | `ListDevices` | `() → a(ssssssssssqqsa(ss)ius(uus)(bsssb)a(usuuuub)i)` | One [`DeviceEntry`] per summary. |
 //! | `ListPorts` | `() → ai` | Type-C `port_number`s currently exposed. |
 //! | `Diagnose` | `(i) → (bsssb)` | Same shape as the per-entry `charging_diag`. `present == false` when no diagnostic is available for the port. |
 //! | `SnapshotJson` | `() → s` | Full structured snapshot serialised with `serde_json`. |
@@ -64,22 +67,22 @@
 //! | `CapabilityDegraded` (signal) | `(iss)` | `(port_number, summary, detail)` when a port's charging diagnostic newly raises `is_warning`. |
 //! | `CapabilityRestored` (signal) | `i` | `port_number` whose previous warning has cleared. |
 //!
-//! # Migrating from `Devices1`
+//! # Migrating from `Devices2`
 //!
-//! Hard cut — `Devices1` is gone, no alias. Clients must:
+//! Hard cut — `Devices2` is gone, no alias. Clients must:
 //!
-//! 1. Update the proxy/`Connect` call to use `org.usbeehive.Devices2`.
-//! 2. Replace `bullets: as` parsing with `properties: a(ss)` lookups by
-//!    machine key. The label vocabulary is documented in the CHANGELOG
-//!    migration entry.
-//! 3. Replace `Diagnose() → (sssb)` callers with `(bsssb)` (the leading
-//!    `present: bool` was added for unambiguous absence — `Fine` is a
-//!    non-empty bottleneck, empty-string-as-absent would conflate them).
-//! 4. Read the new structured fields directly: `link_speed_mbps` for
-//!    speed, `usb_version` for version, `power.power_role` for direction,
-//!    `power.power_in_mw` for inbound watts, `charging_diag.is_warning`
-//!    for "this entry has a user-actionable problem", and `device_class`
-//!    for icon routing.
+//! 1. Update the proxy/`Connect` call to use `org.usbeehive.Devices3`.
+//! 2. Append two trailing fields to the per-entry signature: `pdo_list`
+//!    (`a(usuuuub)`) and `active_pdo_index` (`i`). The full signature is
+//!    `a(ssssssssssqqsa(ss)ius(uus)(bsssb)a(usuuuub)i)`.
+//! 3. Read the new structured PDO list directly from `pdo_list` —
+//!    the legacy `charger_max` property key is retained for stringly
+//!    consumers but is now advisory.
+//! 4. Use the new `cable.trust.{zero_vid,vid_unknown,reserved_bits}`
+//!    keys to surface a cable trust card; the keys are only present
+//!    when their flag fires.
+//! 5. Use the new `transport.{usb2,usb3,tb,dp_altmode}` keys to surface
+//!    active-transport badges; same fire-only convention.
 //!
 //! ## Enum extensibility convention
 //!
@@ -330,7 +333,7 @@ impl State {
     }
 }
 
-/// `org.usbeehive.Devices2` interface implementation.
+/// `org.usbeehive.Devices3` interface implementation.
 pub struct DevicesIface {
     /// Shared state backing every method call.
     pub state: Arc<Mutex<State>>,
@@ -362,7 +365,7 @@ impl DevicesIface {
     }
 }
 
-#[interface(name = "org.usbeehive.Devices2")]
+#[interface(name = "org.usbeehive.Devices3")]
 impl DevicesIface {
     /// Return one [`DeviceEntry`] per summary in the latest snapshot.
     fn list_devices(&self) -> Vec<DeviceEntry> {
