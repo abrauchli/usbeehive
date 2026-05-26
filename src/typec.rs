@@ -24,6 +24,20 @@ pub struct TypeCIdentity {
     pub vdos: Vec<u32>,
 }
 
+/// One alternate-mode entry advertised by a Type-C partner or cable.
+///
+/// Mirrors a `/sys/class/typec/<port>-{partner,cable}.<n>/` directory.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct TypeCAltMode {
+    /// Standard or Vendor ID — e.g. `0xFF01` for VESA DisplayPort,
+    /// `0x8087` for Intel Thunderbolt.
+    pub svid: u16,
+    /// Mode index within the SVID (the kernel exposes one row per mode).
+    pub mode: u32,
+    /// `true` when the altmode has been entered (current contract).
+    pub active: bool,
+}
+
 /// Snapshot of a Type-C **partner** device attached to a port.
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
 pub struct TypeCPartner {
@@ -31,6 +45,8 @@ pub struct TypeCPartner {
     pub r#type: String,
     /// Decoded Discover Identity, if the partner advertises one.
     pub identity: Option<TypeCIdentity>,
+    /// Altmodes advertised by the partner (DisplayPort, Thunderbolt, …).
+    pub altmodes: Vec<TypeCAltMode>,
     /// Every regular file under the partner sysfs directory.
     pub raw_attributes: BTreeMap<String, String>,
 }

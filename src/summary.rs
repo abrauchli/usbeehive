@@ -594,6 +594,15 @@ impl DeviceSummary {
             properties.push(("usb_power_ma".into(), dev.max_power_ma.to_string()));
         }
 
+        // Transport flags — only emit booleans that fire. USB devices can't
+        // expose DP or Thunderbolt altmodes; those live on the Type-C port.
+        if (1..=480).contains(&dev.speed) {
+            properties.push(("transport.usb2".into(), "true".into()));
+        }
+        if dev.speed >= 5000 {
+            properties.push(("transport.usb3".into(), "true".into()));
+        }
+
         DeviceSummary {
             category: if dev.is_hub {
                 Category::Hub
@@ -706,6 +715,21 @@ impl DeviceSummary {
         if !port.orientation.is_empty() && port.orientation != "unknown" {
             s.properties
                 .push(("plug_orientation".into(), port.orientation.clone()));
+        }
+
+        // Active-transport flags from partner altmodes. SVIDs:
+        //   0xFF01 — VESA DisplayPort
+        //   0x8087 — Intel Thunderbolt 3
+        if let Some(partner) = &port.partner {
+            let has_dp = partner.altmodes.iter().any(|a| a.svid == 0xFF01);
+            let has_tb = partner.altmodes.iter().any(|a| a.svid == 0x8087);
+            if has_dp {
+                s.properties
+                    .push(("transport.dp_altmode".into(), "true".into()));
+            }
+            if has_tb {
+                s.properties.push(("transport.tb".into(), "true".into()));
+            }
         }
 
         if let Some(c) = &s.cable {
@@ -1092,6 +1116,67 @@ mod tests {
         assert_eq!(canonical_usb_version("3.20"), "3.2");
         assert_eq!(canonical_usb_version("4.00"), "4.0");
         assert_eq!(canonical_usb_version("2.00"), "2.0");
+    }
+
+    #[test]
+    fn transport_usb3_fires_for_superspeed() {
+        let d = UsbDevice {
+            speed: 10_000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert!(s
+            .properties
+            .iter()
+            .any(|(k, v)| k == "transport.usb3" && v == "true"));
+        assert!(!s.properties.iter().any(|(k, _)| k == "transport.usb2"));
+    }
+
+    #[test]
+    fn transport_usb2_fires_for_highspeed() {
+        let d = UsbDevice {
+            speed: 480,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert!(s
+            .properties
+            .iter()
+            .any(|(k, v)| k == "transport.usb2" && v == "true"));
+        assert!(!s.properties.iter().any(|(k, _)| k == "transport.usb3"));
+    }
+
+    #[test]
+    fn transport_dp_and_tb_from_partner_altmodes() {
+        use crate::typec::{TypeCAltMode, TypeCPartner};
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner {
+                altmodes: vec![
+                    TypeCAltMode {
+                        svid: 0xFF01,
+                        mode: 1,
+                        active: true,
+                    },
+                    TypeCAltMode {
+                        svid: 0x8087,
+                        mode: 1,
+                        active: false,
+                    },
+                ],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, None);
+        assert!(s
+            .properties
+            .iter()
+            .any(|(k, v)| k == "transport.dp_altmode" && v == "true"));
+        assert!(s
+            .properties
+            .iter()
+            .any(|(k, v)| k == "transport.tb" && v == "true"));
     }
 
     #[test]

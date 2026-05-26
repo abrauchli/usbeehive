@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::typec::{TypeCCable, TypeCIdentity, TypeCPartner, TypeCPort, TypeCPowerSupply};
+use crate::typec::{
+    TypeCAltMode, TypeCCable, TypeCIdentity, TypeCPartner, TypeCPort, TypeCPowerSupply,
+};
 
 use super::reader::{self, Sysfs};
 
@@ -127,6 +129,44 @@ pub fn ucsi_controller(path: &str) -> Option<String> {
     }
 }
 
+/// Enumerate altmode sibling directories for a partner or cable.
+///
+/// The kernel exposes alternate modes as siblings of the partner/cable
+/// directory, named `<prefix>.<mode_index>` (e.g. `port0-partner.0`).
+/// Returns an empty vec when the port directory is unreadable or no
+/// altmodes are present.
+fn read_altmodes(port_dir: &Path, prefix: &str) -> Vec<TypeCAltMode> {
+    let Some(parent) = port_dir.parent() else {
+        return Vec::new();
+    };
+    let needle = format!("{prefix}.");
+    let mut out = Vec::new();
+    for sub in reader::subdirs(parent) {
+        let Some(name) = sub.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(tail) = name.strip_prefix(&needle) else {
+            continue;
+        };
+        if !tail.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Some(svid) = reader::read_hex(sub.join("svid")) else {
+            continue;
+        };
+        let mode = reader::read_int(sub.join("mode")).unwrap_or(0) as u32;
+        let active = reader::read_attr(sub.join("active"))
+            .map(|s| matches!(s.as_str(), "yes" | "1"))
+            .unwrap_or(false);
+        out.push(TypeCAltMode {
+            svid: (svid & 0xFFFF) as u16,
+            mode,
+            active,
+        });
+    }
+    out
+}
+
 fn from_sysfs(path: &Path, name: &str, psy_root: &Path) -> Option<TypeCPort> {
     if !name.starts_with("port") {
         return None;
@@ -162,6 +202,7 @@ fn from_sysfs(path: &Path, name: &str, psy_root: &Path) -> Option<TypeCPort> {
         port.partner = Some(TypeCPartner {
             r#type: reader::read_attr(partner_path.join("type")).unwrap_or_default(),
             identity: read_identity(&partner_path),
+            altmodes: read_altmodes(path, &format!("{name}-partner")),
             raw_attributes: reader::read_all_attrs(&partner_path),
         });
     }
