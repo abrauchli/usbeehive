@@ -24,7 +24,7 @@ use crate::diagnostic::ChargingDiagnostic;
 use crate::pd::{decode_id_header, product_type_label};
 use crate::power::PowerDeliveryPort;
 use crate::typec::{TypeCPort, TypeCPowerSupply};
-use crate::usb::UsbDevice;
+use crate::usb::{UsbDevice, UsbInterface};
 use crate::usbclass;
 use crate::vendor;
 
@@ -82,8 +82,9 @@ pub enum DeviceClass {
     VideoCapture,
     /// USB-IF Printer (0x07).
     Printer,
-    /// iPhones (Apple VID + product) and Android handsets (product
-    /// string `android`).
+    /// iPhones (Apple VID + product) and Android handsets — detected via
+    /// product-string `android`, ADB/PTP+vendor-class interface signatures,
+    /// or a phone-VID allowlist paired with PTP / MTP-shaped functions.
     Phone,
     /// USB-IF Hub (0x09).
     Hub,
@@ -249,11 +250,61 @@ fn is_security_key(vendor_id: u16, product_lower: &str) -> bool {
     .any(|needle| product_lower.contains(needle))
 }
 
-fn is_phone(vendor_id: u16, product_lower: &str) -> bool {
+/// Known phone-maker USB vendor IDs. Used as a fallback signal when a
+/// composite advertises an MTP/PTP function but no ADB function — most real
+/// phones do, modulo developer-mode off.
+const PHONE_VIDS: &[u16] = &[
+    0x18D1, // Google
+    0x04E8, // Samsung
+    0x22B8, // Motorola
+    0x0FCE, // Sony Mobile
+    0x1BBB, // Bullitt / Cat
+    0x2A70, // OnePlus
+    0x2717, // Xiaomi
+    0x12D1, // Huawei
+    0x19D2, // ZTE
+    0x0BB4, // HTC
+    0x1004, // LG Electronics
+    0x0E8D, // MediaTek (used by many phone OEMs)
+    0x2A45, // Meizu
+    0x2916, // Oppo
+    0x05C6, // Qualcomm (used by many Android composites)
+];
+
+fn iface_matches(ifaces: &[UsbInterface], class: u8, sub: u8, proto: u8) -> bool {
+    ifaces
+        .iter()
+        .any(|i| i.class_code == class && i.sub_class == sub && i.protocol == proto)
+}
+
+fn is_phone(vendor_id: u16, product_lower: &str, ifaces: &[UsbInterface]) -> bool {
     if vendor_id == 0x05AC && product_lower.contains("iphone") {
         return true;
     }
-    product_lower.contains("android")
+    if product_lower.contains("android") {
+        return true;
+    }
+    // ADB function signature. No camera, printer, or UART bridge uses this
+    // triple — it's a strong positive indicator of an Android composite.
+    if iface_matches(ifaces, 0xFF, 0x42, 0x01) {
+        return true;
+    }
+    let has_ptp = iface_matches(ifaces, 0x06, 0x01, 0x01);
+    // MTP isn't a USB-IF class — it's typically advertised as vendor-specific
+    // (0xFF). Phones that expose MTP without ADB show a 0xFF interface
+    // alongside the PTP one.
+    let has_vendor_specific = ifaces.iter().any(|i| i.class_code == 0xFF);
+    // PTP-only is a DSLR (Canon, Nikon). PTP paired with vendor-specific is
+    // the Android composite shape.
+    if has_ptp && has_vendor_specific {
+        return true;
+    }
+    // Phone-VID fallback: catches Android phones that don't expose ADB and
+    // are PTP-only (e.g. Cat S61 in MTP/Photo Transfer modes).
+    if PHONE_VIDS.contains(&vendor_id) && (has_ptp || has_vendor_specific) {
+        return true;
+    }
+    false
 }
 
 fn is_capture_card(product_lower: &str) -> bool {
@@ -325,7 +376,7 @@ pub fn classify_usb(dev: &UsbDevice) -> (DeviceClass, String) {
     if is_security_key(dev.vendor_id, &product_lower) {
         return (DeviceClass::SecurityKey, String::new());
     }
-    if is_phone(dev.vendor_id, &product_lower) {
+    if is_phone(dev.vendor_id, &product_lower, &dev.interfaces) {
         return (DeviceClass::Phone, String::new());
     }
 
@@ -933,6 +984,78 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(classify_usb(&d).0, DeviceClass::Phone);
+    }
+
+    #[test]
+    fn classify_phone_android_via_adb_signature() {
+        // Pixel-like composite with USB debugging enabled — ADB function
+        // present alongside MTP (vendor-class) and an ACM serial diag
+        // interface. The serial interface would otherwise win the inner
+        // CDC-ACM branch and misclassify the device.
+        let d = UsbDevice {
+            vendor_id: 0x18D1,
+            product: "Pixel 7".into(),
+            interfaces: vec![
+                UsbInterface {
+                    class_code: 0xFF,
+                    sub_class: 0x42,
+                    protocol: 0x01,
+                    ..Default::default()
+                },
+                UsbInterface {
+                    class_code: 0x02,
+                    sub_class: 0x02,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(classify_usb(&d).0, DeviceClass::Phone);
+    }
+
+    #[test]
+    fn classify_phone_cat_s61_via_vid_and_ptp() {
+        // Cat S61 (Bullitt 0x1BBB). iProduct is the model name — no `android`
+        // substring — and the device exposes PTP + a CDC-ACM diag function.
+        // Without the VID+PTP fallback this gets classified as Serial.
+        let d = UsbDevice {
+            vendor_id: 0x1BBB,
+            product: "Cat S61".into(),
+            interfaces: vec![
+                UsbInterface {
+                    class_code: 0x06,
+                    sub_class: 0x01,
+                    protocol: 0x01,
+                    ..Default::default()
+                },
+                UsbInterface {
+                    class_code: 0x02,
+                    sub_class: 0x02,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(classify_usb(&d).0, DeviceClass::Phone);
+    }
+
+    #[test]
+    fn classify_camera_not_misidentified_as_phone() {
+        // DSLR exposing pure PTP (no vendor-class interface, unknown VID).
+        // Must classify as Camera, not Phone — the heuristic threshold is
+        // PTP + vendor-class, OR phone-VID + PTP.
+        let d = UsbDevice {
+            vendor_id: 0x04A9, // Canon
+            product: "EOS R5".into(),
+            interfaces: vec![UsbInterface {
+                class_code: 0x06,
+                sub_class: 0x01,
+                protocol: 0x01,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_ne!(classify_usb(&d).0, DeviceClass::Phone);
     }
 
     #[test]
