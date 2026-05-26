@@ -18,5 +18,6 @@ pub mod error;
 pub mod manager;
 pub mod power;
 pub mod reader;
+pub mod thunderbolt;
 pub mod typec;
 pub mod usb;

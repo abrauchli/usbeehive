@@ -53,6 +53,7 @@ pub mod diagnostic;
 pub mod pd;
 pub mod power;
 pub mod summary;
+pub mod thunderbolt;
 pub mod typec;
 pub mod usb;
 pub mod usbclass;
@@ -68,6 +69,7 @@ pub use cable::CableInfo;
 pub use diagnostic::{Bottleneck, ChargingDiagnostic};
 pub use power::{PdoType, PowerDataObject, PowerDeliveryPort};
 pub use summary::{Category, DeviceSummary, Status};
+pub use thunderbolt::ThunderboltRouter;
 pub use typec::{TypeCCable, TypeCIdentity, TypeCPartner, TypeCPort, TypeCPowerSupply};
 pub use usb::{LinkSpeed, UsbDevice, UsbInterface};
 

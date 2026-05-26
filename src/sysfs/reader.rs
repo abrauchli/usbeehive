@@ -81,6 +81,11 @@ impl Sysfs {
     pub fn power_supply_dir(&self) -> PathBuf {
         self.root.join("class/power_supply")
     }
+
+    /// Path to `/sys/bus/thunderbolt/devices` under this root.
+    pub fn thunderbolt_dir(&self) -> PathBuf {
+        self.root.join("bus/thunderbolt/devices")
+    }
 }
 
 /// Read a sysfs attribute as a trimmed string. Returns `None` if the file
@@ -240,6 +245,10 @@ mod tests {
         assert_eq!(
             s.power_supply_dir(),
             Path::new("/some/root/class/power_supply")
+        );
+        assert_eq!(
+            s.thunderbolt_dir(),
+            Path::new("/some/root/bus/thunderbolt/devices")
         );
     }
 }

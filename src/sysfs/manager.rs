@@ -4,6 +4,7 @@
 use crate::cable::CableInfo;
 use crate::power::PowerDeliveryPort;
 use crate::summary::DeviceSummary;
+use crate::thunderbolt::{self, ThunderboltRouter};
 use crate::typec::TypeCPort;
 use crate::usb::UsbDevice;
 
@@ -18,6 +19,8 @@ pub struct Snapshot {
     pub typec_ports: Vec<TypeCPort>,
     /// USB-PD ports observed in `/sys/class/usb_power_delivery/`.
     pub pd_ports: Vec<PowerDeliveryPort>,
+    /// Thunderbolt / USB4 routers observed in `/sys/bus/thunderbolt/devices/`.
+    pub thunderbolt_routers: Vec<ThunderboltRouter>,
     /// Plain-English summaries (one per non-root-hub device + one per Type-C port).
     pub summaries: Vec<DeviceSummary>,
 }
@@ -153,11 +156,14 @@ impl DeviceManager {
         let usb_devices = self.sysfs.usb_devices();
         let typec_ports = self.sysfs.typec_ports();
         let pd_ports = self.sysfs.pd_ports();
-        let summaries = build_summaries(&usb_devices, &typec_ports, &pd_ports);
+        let thunderbolt_routers = self.sysfs.thunderbolt_routers();
+        let summaries =
+            build_summaries(&usb_devices, &typec_ports, &pd_ports, &thunderbolt_routers);
         self.snapshot = Snapshot {
             usb_devices,
             typec_ports,
             pd_ports,
+            thunderbolt_routers,
             summaries,
         };
     }
@@ -187,20 +193,31 @@ impl DeviceManager {
         &self.snapshot.pd_ports
     }
 
+    /// Convenience accessor — Thunderbolt / USB4 routers.
+    pub fn thunderbolt_routers(&self) -> &[ThunderboltRouter] {
+        &self.snapshot.thunderbolt_routers
+    }
+
     /// The sysfs handle this manager was constructed with.
     pub fn sysfs(&self) -> &Sysfs {
         &self.sysfs
     }
 }
 
-/// Build per-device summaries from a structured triple. Public so callers
-/// using a non-sysfs backend can still get the aggregate view.
+/// Build per-device summaries from the structured snapshot inputs. Public so
+/// callers using a non-sysfs backend can still get the aggregate view.
+///
+/// `tb` carries the Thunderbolt / USB4 router list — used to derive the
+/// `transport.usb4` property on Type-C ports when both ends of the link
+/// negotiated USB4. Pass `&[]` if you don't have the data.
 pub fn build_summaries(
     usb: &[UsbDevice],
     ports: &[TypeCPort],
     pd: &[PowerDeliveryPort],
+    tb: &[ThunderboltRouter],
 ) -> Vec<DeviceSummary> {
     let mut out = Vec::with_capacity(usb.len() + ports.len());
+    let usb4_link = thunderbolt::system_has_usb4_link(tb);
 
     for tc in ports {
         let pd_match = pd
@@ -215,7 +232,17 @@ pub fn build_summaries(
                 }
             });
         let cable = tc.cable.as_ref().map(CableInfo::from_typec_cable);
-        out.push(DeviceSummary::from_typec_port(tc, pd_match, cable));
+        let mut summary = DeviceSummary::from_typec_port(tc, pd_match, cable);
+        // USB4 isn't an altmode — it's negotiated in PD enter-mode and only
+        // surfaces through the `thunderbolt` subsystem. Fire `transport.usb4`
+        // when the system has an active USB4 link AND this port has a
+        // partner that could plausibly be carrying it.
+        if usb4_link && tc.partner.is_some() {
+            summary
+                .properties
+                .push(("transport.usb4".into(), "true".into()));
+        }
+        out.push(summary);
     }
 
     for d in usb {
@@ -247,7 +274,7 @@ mod tests {
             product: "thing".into(),
             ..Default::default()
         };
-        let summaries = build_summaries(&[root, child], &[], &[]);
+        let summaries = build_summaries(&[root, child], &[], &[], &[]);
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].headline, "thing");
         assert_eq!(summaries[0].category, Category::UsbDevice);
@@ -270,7 +297,7 @@ mod tests {
             max_source_power_mw: 60_000,
             ..Default::default()
         };
-        let summaries = build_summaries(&[], &[port], &[pd]);
+        let summaries = build_summaries(&[], &[port], &[pd], &[]);
         assert_eq!(summaries.len(), 1);
         assert!(summaries[0].power_delivery.is_some());
     }
@@ -296,7 +323,7 @@ mod tests {
             max_source_power_mw: 100_000,
             ..Default::default()
         };
-        let summaries = build_summaries(&[], &[p0, p1], &[pd_for_p1]);
+        let summaries = build_summaries(&[], &[p0, p1], &[pd_for_p1], &[]);
         assert!(summaries[0].power_delivery.is_none());
         assert!(summaries[1].power_delivery.is_some());
     }
@@ -314,11 +341,11 @@ mod tests {
             ..Default::default()
         };
         let prev = Snapshot {
-            summaries: build_summaries(std::slice::from_ref(&usb_a), &[], &[]),
+            summaries: build_summaries(std::slice::from_ref(&usb_a), &[], &[], &[]),
             ..Default::default()
         };
         let cur = Snapshot {
-            summaries: build_summaries(std::slice::from_ref(&usb_b), &[], &[]),
+            summaries: build_summaries(std::slice::from_ref(&usb_b), &[], &[], &[]),
             ..Default::default()
         };
         let diff = cur.diff(&prev);
@@ -348,7 +375,7 @@ mod tests {
 
         // Previous: same port, no charger → no diagnostic.
         let prev = Snapshot {
-            summaries: build_summaries(&[], std::slice::from_ref(&port), &[]),
+            summaries: build_summaries(&[], std::slice::from_ref(&port), &[], &[]),
             ..Default::default()
         };
         // Current: charger plugged in, but the cable is rated only 60W.
@@ -356,6 +383,7 @@ mod tests {
             &[],
             std::slice::from_ref(&port),
             std::slice::from_ref(&charger),
+            &[],
         );
         // Inject a CableLimit warning so we don't depend on the cable decoder
         // for this assertion.
@@ -381,7 +409,7 @@ mod tests {
             partner: Some(TypeCPartner::default()),
             ..Default::default()
         };
-        let mut prev_summaries = build_summaries(&[], std::slice::from_ref(&port), &[]);
+        let mut prev_summaries = build_summaries(&[], std::slice::from_ref(&port), &[], &[]);
         prev_summaries[0].charging_diag = Some(crate::diagnostic::ChargingDiagnostic {
             bottleneck: crate::diagnostic::Bottleneck::CableLimit,
             summary: "Cable is limiting charging speed".into(),
@@ -394,7 +422,7 @@ mod tests {
         };
         // Current: same port, no warning anymore.
         let cur = Snapshot {
-            summaries: build_summaries(&[], std::slice::from_ref(&port), &[]),
+            summaries: build_summaries(&[], std::slice::from_ref(&port), &[], &[]),
             ..Default::default()
         };
         let diff = cur.diff(&prev);
@@ -410,7 +438,7 @@ mod tests {
             ..Default::default()
         };
         let snap = Snapshot {
-            summaries: build_summaries(&[usb], &[], &[]),
+            summaries: build_summaries(&[usb], &[], &[], &[]),
             ..Default::default()
         };
         let diff = snap.diff(&snap.clone());
@@ -425,6 +453,97 @@ mod tests {
         assert!(s.usb_devices.is_empty());
         assert!(s.typec_ports.is_empty());
         assert!(s.pd_ports.is_empty());
+        assert!(s.thunderbolt_routers.is_empty());
         assert!(s.summaries.is_empty());
+    }
+
+    #[test]
+    fn transport_usb4_fires_for_port_with_partner_when_usb4_link_present() {
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner::default()),
+            ..Default::default()
+        };
+        let routers = vec![
+            ThunderboltRouter {
+                route: "0-0".into(),
+                is_host: true,
+                generation: 4,
+                ..Default::default()
+            },
+            ThunderboltRouter {
+                route: "0-1".into(),
+                is_host: false,
+                generation: 4,
+                ..Default::default()
+            },
+        ];
+        let summaries = build_summaries(&[], std::slice::from_ref(&port), &[], &routers);
+        let s = &summaries[0];
+        assert!(s
+            .properties
+            .iter()
+            .any(|(k, v)| k == "transport.usb4" && v == "true"));
+    }
+
+    #[test]
+    fn transport_usb4_silent_when_only_tbt3_partner() {
+        // USB4-capable host, but the partner is a TBT3-only dock — link
+        // runs at TBT3, not USB4.
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner::default()),
+            ..Default::default()
+        };
+        let routers = vec![
+            ThunderboltRouter {
+                route: "0-0".into(),
+                is_host: true,
+                generation: 4,
+                ..Default::default()
+            },
+            ThunderboltRouter {
+                route: "0-1".into(),
+                is_host: false,
+                generation: 3,
+                ..Default::default()
+            },
+        ];
+        let summaries = build_summaries(&[], std::slice::from_ref(&port), &[], &routers);
+        assert!(!summaries[0]
+            .properties
+            .iter()
+            .any(|(k, _)| k == "transport.usb4"));
+    }
+
+    #[test]
+    fn transport_usb4_silent_for_empty_port() {
+        // No partner attached → don't ascribe USB4 to the port even if the
+        // system has an active link elsewhere.
+        let port = TypeCPort {
+            port_number: 0,
+            partner: None,
+            cable: None,
+            ..Default::default()
+        };
+        let routers = vec![
+            ThunderboltRouter {
+                route: "0-0".into(),
+                is_host: true,
+                generation: 4,
+                ..Default::default()
+            },
+            ThunderboltRouter {
+                route: "0-1".into(),
+                is_host: false,
+                generation: 4,
+                ..Default::default()
+            },
+        ];
+        let summaries = build_summaries(&[], std::slice::from_ref(&port), &[], &routers);
+        assert!(!summaries[0]
+            .properties
+            .iter()
+            .any(|(k, _)| k == "transport.usb4"));
     }
 }
