@@ -575,6 +575,28 @@ impl DeviceSummary {
             String::new()
         };
 
+        // Headline preference: iProduct descriptor first; otherwise
+        // synthesize a friendlier name than the raw VID:PID. Lots of
+        // built-in chips (Intel 8087:0029 Bluetooth, USB-IF root hubs,
+        // composite SoCs) ship without an iProduct string — UI clients
+        // showing only the headline would otherwise render "8087:0029".
+        let headline = if !dev.product.is_empty() {
+            dev.product.clone()
+        } else {
+            let mut parts: Vec<&str> = Vec::new();
+            if !vendor_display.is_empty() {
+                parts.push(&vendor_display);
+            }
+            if !device_type.is_empty() && !parts.iter().any(|p| p == &device_type.as_str()) {
+                parts.push(&device_type);
+            }
+            if parts.is_empty() {
+                dev.display_name()
+            } else {
+                parts.join(" ")
+            }
+        };
+
         let primary = primary_driver(dev);
 
         // Properties — machine keys per CONTEXT.md.
@@ -612,7 +634,7 @@ impl DeviceSummary {
             device_class,
             device_subclass,
             status: Status::Connected,
-            headline: dev.display_name(),
+            headline,
             subtitle,
             icon,
             vendor: vendor_display,
@@ -1133,6 +1155,104 @@ mod tests {
         assert_eq!(canonical_usb_version("3.20"), "3.2");
         assert_eq!(canonical_usb_version("4.00"), "4.0");
         assert_eq!(canonical_usb_version("2.00"), "2.0");
+    }
+
+    #[test]
+    fn headline_synthesizes_vendor_class_when_iproduct_is_empty() {
+        // Intel 8087:0029 Bluetooth radio — built-in chip with no iProduct
+        // descriptor. UI clients reading only `headline` should see
+        // "Intel Wireless" instead of "8087:0029".
+        let d = UsbDevice {
+            vendor_id: 0x8087,
+            product_id: 0x0029,
+            product: String::new(),
+            manufacturer: String::new(),
+            device_class: 0xE0,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(s.headline, "Intel Wireless");
+        // Vendor / product / VID:PID are still exposed structurally for UI
+        // clients that want to render the raw identifier.
+        assert_eq!(s.vendor_id, 0x8087);
+        assert_eq!(s.product_id, 0x0029);
+    }
+
+    #[test]
+    fn headline_uses_manufacturer_descriptor_over_vendor_db() {
+        // When the USB descriptor's `iManufacturer` is populated, prefer
+        // that over the vendor DB lookup for the headline.
+        let d = UsbDevice {
+            vendor_id: 0x8087,
+            product_id: 0x0029,
+            product: String::new(),
+            manufacturer: "Intel Corp.".into(),
+            device_class: 0xE0,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(s.headline, "Intel Corp. Wireless");
+    }
+
+    #[test]
+    fn headline_falls_back_to_class_when_vendor_unknown() {
+        let d = UsbDevice {
+            vendor_id: 0xDEAD,
+            product_id: 0xBEEF,
+            product: String::new(),
+            manufacturer: String::new(),
+            device_class: 0x08, // Mass Storage
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(s.headline, "Mass Storage");
+    }
+
+    #[test]
+    fn headline_falls_back_to_vendor_when_class_unknown() {
+        let d = UsbDevice {
+            vendor_id: 0x8087,
+            product_id: 0x0029,
+            product: String::new(),
+            manufacturer: String::new(),
+            device_class: 0,
+            interfaces: vec![],
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(s.headline, "Intel");
+    }
+
+    #[test]
+    fn headline_falls_back_to_vidpid_when_nothing_known() {
+        let d = UsbDevice {
+            vendor_id: 0xDEAD,
+            product_id: 0xBEEF,
+            product: String::new(),
+            manufacturer: String::new(),
+            device_class: 0,
+            interfaces: vec![],
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(s.headline, "dead:beef");
+    }
+
+    #[test]
+    fn headline_prefers_iproduct_descriptor_when_present() {
+        // Existing behaviour preserved: a real iProduct string wins over
+        // the synthesized vendor+class form.
+        let d = UsbDevice {
+            vendor_id: 0x05AC,
+            product_id: 0x12A8,
+            product: "iPhone".into(),
+            manufacturer: "Apple".into(),
+            device_class: 0,
+            interfaces: vec![],
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(s.headline, "iPhone");
     }
 
     #[test]
