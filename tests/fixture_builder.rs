@@ -132,6 +132,78 @@ pub fn write_typec_port(root: &Path, port_name: &str, fields: &[(&str, &str)]) -
     dir
 }
 
+/// Helper: write a Type-C port directory rooted under a fake UCSI platform
+/// path so `Sysfs::canonicalize` resolves to a path containing the
+/// `USBC000:00`-style controller id — needed for live-voltage / active-PDO
+/// inference tests, which match the port to a `ucsi-source-psy-*` entry.
+///
+/// Layout produced:
+/// - real dir: `<root>/devices/platform/<controller>/typec/<port_name>/`
+/// - symlink:  `<root>/class/typec/<port_name>` → real dir
+pub fn write_typec_port_under_ucsi(
+    root: &Path,
+    controller: &str,
+    port_name: &str,
+    fields: &[(&str, &str)],
+) -> PathBuf {
+    let real_dir = root
+        .join("devices/platform")
+        .join(controller)
+        .join("typec")
+        .join(port_name);
+    fs::create_dir_all(&real_dir).unwrap();
+    for (k, v) in fields {
+        write_attr(&real_dir, k, v);
+    }
+    let class_dir = root.join("class/typec");
+    fs::create_dir_all(&class_dir).unwrap();
+    let symlink_path = class_dir.join(port_name);
+    if symlink_path.exists() || symlink_path.symlink_metadata().is_ok() {
+        // Best-effort idempotence — tests may call this twice.
+        let _ = fs::remove_dir_all(&symlink_path);
+        let _ = fs::remove_file(&symlink_path);
+    }
+    std::os::unix::fs::symlink(&real_dir, &symlink_path).unwrap();
+    real_dir
+}
+
+/// Helper: write a UCSI source-side power-supply directory at
+/// `<root>/class/power_supply/ucsi-source-psy-<controller><port_index>/`.
+/// `port_index` is `port_number + 1` (the kernel uses 1-based naming).
+pub fn write_ucsi_source_psy(
+    root: &Path,
+    controller: &str,
+    port_index: u32,
+    fields: &[(&str, &str)],
+) -> PathBuf {
+    let dir = root
+        .join("class/power_supply")
+        .join(format!("ucsi-source-psy-{controller}{port_index}"));
+    fs::create_dir_all(&dir).unwrap();
+    for (k, v) in fields {
+        write_attr(&dir, k, v);
+    }
+    dir
+}
+
+/// Helper: write a Thunderbolt / USB4 router under
+/// `<root>/bus/thunderbolt/devices/<route>/` with at minimum a `generation`
+/// attribute. Tests can pass extra attrs (vendor_name, device_name, …).
+pub fn write_thunderbolt_router(
+    root: &Path,
+    route: &str,
+    generation: u8,
+    fields: &[(&str, &str)],
+) -> PathBuf {
+    let dir = root.join("bus/thunderbolt/devices").join(route);
+    fs::create_dir_all(&dir).unwrap();
+    write_attr(&dir, "generation", &generation.to_string());
+    for (k, v) in fields {
+        write_attr(&dir, k, v);
+    }
+    dir
+}
+
 /// Helper: write a Type-C cable directory `<port>-cable` with VDOs.
 pub fn write_typec_cable(
     root: &Path,

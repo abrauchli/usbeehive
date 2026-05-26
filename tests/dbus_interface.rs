@@ -279,6 +279,177 @@ mod dbus_tests {
     }
 
     #[test]
+    fn list_devices_resolves_active_pdo_index_via_live_ucsi_voltage() {
+        // End-to-end wire check: sysfs publishes every PDO with
+        // is_active=false; the active-PDO inference reads the UCSI live
+        // voltage_now to mark the contracted one. Without this, the wire
+        // field `active_pdo_index` would resolve to -1 against real
+        // hardware. Fixture: 20V live UCSI → 20V PDO should win.
+        let root = TempRoot::new("dbus-active-pdo");
+        let controller = "USBC000:00";
+
+        write_typec_port_under_ucsi(
+            root.path(),
+            controller,
+            "port0",
+            &[
+                ("data_role", "host [device]"),
+                ("power_role", "[sink] source"),
+                ("port_type", "sink"),
+                ("orientation", "normal"),
+            ],
+        );
+        write_typec_partner(root.path(), "port0", "device", &[]);
+
+        write_ucsi_source_psy(
+            root.path(),
+            controller,
+            1, // port_number 0 → directory suffix 1
+            &[
+                ("online", "1"),
+                ("voltage_now", "20000000"), // 20.0V in µV
+                ("current_now", "4500000"),  // 4.5A in µA
+                ("voltage_max", "20000000"),
+            ],
+        );
+
+        write_pd_port(
+            root.path(),
+            "pd0",
+            0,
+            &[
+                PdoFixture {
+                    voltage_mv: 5_000,
+                    current_ma: 3_000,
+                    power_mw: 15_000,
+                    kind: "fixed_supply",
+                    min_voltage_mv: 0,
+                    max_voltage_mv: 0,
+                },
+                PdoFixture {
+                    voltage_mv: 9_000,
+                    current_ma: 3_000,
+                    power_mw: 27_000,
+                    kind: "fixed_supply",
+                    min_voltage_mv: 0,
+                    max_voltage_mv: 0,
+                },
+                PdoFixture {
+                    voltage_mv: 20_000,
+                    current_ma: 5_000,
+                    power_mw: 100_000,
+                    kind: "fixed_supply",
+                    min_voltage_mv: 0,
+                    max_voltage_mv: 0,
+                },
+            ],
+        );
+
+        let state = make_state(root.path());
+        {
+            let mut guard = state.lock().unwrap();
+            guard.refresh();
+        }
+        let iface = DevicesIface { state };
+        let entries = iface.snapshot_entries();
+
+        let port = entries.iter().find(|e| e.category == "TypeCPort").unwrap();
+        assert_eq!(port.pdo_list.len(), 3);
+        // 20V PDO is index 2 in the list; inference must mark it active.
+        assert_eq!(
+            port.active_pdo_index, 2,
+            "expected 20V (index 2) to be active, got {}",
+            port.active_pdo_index
+        );
+        assert!(port.pdo_list[2].is_active);
+        assert!(!port.pdo_list[0].is_active);
+        assert!(!port.pdo_list[1].is_active);
+        assert_eq!(port.pdo_list[2].voltage_mv, 20_000);
+    }
+
+    #[test]
+    fn list_devices_emits_transport_usb4_when_link_is_usb4() {
+        // End-to-end wire check: a Type-C port with a partner under a USB4
+        // host (thunderbolt `0-0`, generation 4) and a USB4-capable connected
+        // router (`0-1`, generation 4) must publish `transport.usb4=true`.
+        let root = TempRoot::new("dbus-usb4");
+        write_typec_port(
+            root.path(),
+            "port0",
+            &[
+                ("data_role", "host [device]"),
+                ("power_role", "[source] sink"),
+                ("port_type", "dual"),
+                ("orientation", "normal"),
+            ],
+        );
+        write_typec_partner(root.path(), "port0", "device", &[]);
+
+        write_thunderbolt_router(
+            root.path(),
+            "0-0",
+            4,
+            &[("vendor_name", "Intel"), ("device_name", "Maple Ridge")],
+        );
+        write_thunderbolt_router(
+            root.path(),
+            "0-1",
+            4,
+            &[
+                ("vendor_name", "OWC"),
+                ("device_name", "Thunderbolt Hub"),
+                ("unique_id", "deadbeef-0001"),
+            ],
+        );
+
+        let state = make_state(root.path());
+        {
+            let mut guard = state.lock().unwrap();
+            guard.refresh();
+        }
+        let iface = DevicesIface { state };
+        let entries = iface.snapshot_entries();
+
+        let port = entries.iter().find(|e| e.category == "TypeCPort").unwrap();
+        let p: std::collections::HashMap<_, _> = port
+            .properties
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(p.get("transport.usb4").copied(), Some("true"));
+    }
+
+    #[test]
+    fn list_devices_omits_transport_usb4_when_only_tbt3_router_attached() {
+        // USB4-capable host but the connected dock is TBT3-only — link runs
+        // at TBT3, the wire must stay silent on `transport.usb4`.
+        let root = TempRoot::new("dbus-usb4-tbt3-only");
+        write_typec_port(
+            root.path(),
+            "port0",
+            &[("port_type", "dual"), ("power_role", "[source] sink")],
+        );
+        write_typec_partner(root.path(), "port0", "device", &[]);
+
+        write_thunderbolt_router(root.path(), "0-0", 4, &[]); // USB4 host
+        write_thunderbolt_router(root.path(), "0-1", 3, &[]); // TBT3 partner
+
+        let state = make_state(root.path());
+        {
+            let mut guard = state.lock().unwrap();
+            guard.refresh();
+        }
+        let iface = DevicesIface { state };
+        let entries = iface.snapshot_entries();
+
+        let port = entries.iter().find(|e| e.category == "TypeCPort").unwrap();
+        assert!(!port
+            .properties
+            .iter()
+            .any(|(k, _)| k == "transport.usb4"));
+    }
+
+    #[test]
     fn dbus_constants_match_freedesktop_naming() {
         // Soft sanity guard — these strings end up in `.service` files,
         // generated D-Bus stubs in other languages, and screenshots. Catch
