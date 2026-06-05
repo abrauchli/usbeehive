@@ -47,6 +47,21 @@ The Rust rewrite is forked from
 cargo install usbeehive
 ```
 
+To run the [usbee](https://github.com/abrauchli/usbee) GNOME Shell
+extension, install with the D-Bus daemon enabled:
+
+```bash
+cargo install usbeehive --features dbus
+```
+
+`--features dbus` builds the `usbeehived` daemon, which compiles C code and
+needs a C compiler (`cc`) plus the `libudev` development headers:
+
+```bash
+# Ubuntu / Debian
+sudo apt install gcc libudev-dev
+```
+
 ### Build from source
 
 Requires Rust 1.85+ ([rustup](https://rustup.rs)) and `libudev` development
@@ -159,12 +174,16 @@ Build with the `dbus` feature to get a long-running daemon, `usbeehived`,
 that publishes the live snapshot on the session bus. Useful for desktop
 applets (KDE / GNOME / tray apps) that want to react to cable plugs and
 charging-bottleneck changes without each one re-implementing sysfs
-enumeration.
+enumeration. The [usbee](https://github.com/abrauchli/usbee) GNOME Shell
+extension is one such client.
 
 ```bash
 cargo build --release --no-default-features --features dbus
 ./target/release/usbeehived                                # foreground
 ```
+
+Building the `dbus` feature requires a C compiler (`cc`) and the `libudev`
+development headers — on Ubuntu / Debian: `sudo apt install gcc libudev-dev`.
 
 Wire surface — `org.usbeehive.Devices3` at `/org/usbeehive/Devices`:
 
