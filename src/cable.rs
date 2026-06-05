@@ -93,8 +93,7 @@ impl CableInfo {
         info.vendor_id = id.vendor_id;
         info.vendor_name = vendor::lookup(id.vendor_id);
         info.trust.zero_vid = id.vendor_id == 0;
-        info.trust.vid_unknown =
-            id.vendor_id != 0 && vendor::is_hex_fallback(&info.vendor_name);
+        info.trust.vid_unknown = id.vendor_id != 0 && vendor::is_hex_fallback(&info.vendor_name);
         let Some(&first) = id.vdos.first() else {
             return info;
         };

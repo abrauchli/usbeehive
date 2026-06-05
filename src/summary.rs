@@ -800,8 +800,7 @@ impl DeviceSummary {
         // publishes which PDOs are *advertised*, not which one is
         // contracted — so without this pass `is_active` is always `false`
         // against real hardware and `active_pdo_index` resolves to `-1`.
-        if let (Some(pd_port), Some(psy)) =
-            (s.power_delivery.as_mut(), port.power_supply.as_ref())
+        if let (Some(pd_port), Some(psy)) = (s.power_delivery.as_mut(), port.power_supply.as_ref())
         {
             if psy.online {
                 if let Some(uv) = psy.voltage_now_uv {
@@ -1429,7 +1428,10 @@ mod tests {
         let pd_out = s.power_delivery.as_ref().unwrap();
         assert!(!pd_out.source_capabilities[0].is_active);
         assert!(!pd_out.source_capabilities[1].is_active);
-        assert!(pd_out.source_capabilities[2].is_active, "20V PDO should be active");
+        assert!(
+            pd_out.source_capabilities[2].is_active,
+            "20V PDO should be active"
+        );
         assert_eq!(pd_out.active_source_pdo_index, Some(3));
     }
 

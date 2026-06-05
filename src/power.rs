@@ -249,10 +249,7 @@ mod tests {
     #[test]
     fn infer_active_source_pdo_tolerates_voltage_drop() {
         let mut port = PowerDeliveryPort {
-            source_capabilities: vec![
-                fixed(1, 5_000, 3_000),
-                fixed(2, 20_000, 5_000),
-            ],
+            source_capabilities: vec![fixed(1, 5_000, 3_000), fixed(2, 20_000, 5_000)],
             ..Default::default()
         };
         // 19.7V under load — should still match the 20V PDO.

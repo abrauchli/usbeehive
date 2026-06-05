@@ -102,8 +102,18 @@ mod tests {
     #[test]
     fn enumerates_host_and_device_routers() {
         let d = super::super::reader::tempdir_lite::TmpDir::new("tb-enum");
-        write_router(d.path(), "0-0", 4, &[("vendor_name", "Intel"), ("device_name", "Maple Ridge")]);
-        write_router(d.path(), "0-1", 4, &[("vendor_name", "OWC"), ("unique_id", "abcd")]);
+        write_router(
+            d.path(),
+            "0-0",
+            4,
+            &[("vendor_name", "Intel"), ("device_name", "Maple Ridge")],
+        );
+        write_router(
+            d.path(),
+            "0-1",
+            4,
+            &[("vendor_name", "OWC"), ("unique_id", "abcd")],
+        );
         write_router(d.path(), "0-1-1", 3, &[]);
         // Subsystem link without a generation file → ignored.
         fs::create_dir_all(d.path().join("domain0")).unwrap();

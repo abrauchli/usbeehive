@@ -443,10 +443,7 @@ mod dbus_tests {
         let entries = iface.snapshot_entries();
 
         let port = entries.iter().find(|e| e.category == "TypeCPort").unwrap();
-        assert!(!port
-            .properties
-            .iter()
-            .any(|(k, _)| k == "transport.usb4"));
+        assert!(!port.properties.iter().any(|(k, _)| k == "transport.usb4"));
     }
 
     #[test]
