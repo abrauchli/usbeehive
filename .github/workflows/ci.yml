@@ -5,6 +5,11 @@ on:
     branches: [master, main]
   pull_request:
 
+# Run JavaScript-based actions (e.g. actions/cache) on Node.js 24 instead of
+# the deprecated Node.js 20 runtime.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     runs-on: ubuntu-latest

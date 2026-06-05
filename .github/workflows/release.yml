@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# Run JavaScript-based actions (e.g. actions/upload-artifact) on Node.js 24
+# instead of the deprecated Node.js 20 runtime.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
