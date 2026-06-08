@@ -829,30 +829,37 @@ impl DeviceSummary {
                     .map(|p| p.power_mw)
                     .unwrap_or(pd_port.max_source_power_mw);
             }
-            // Live UCSI overrides if available.
-            if let Some(psy) = &port.power_supply {
-                if let Some(live_mw) = psy.negotiated_power_mw() {
-                    if live_mw > 0 {
-                        sink_power_mw = live_mw as u32;
-                    }
-                }
-            }
             s.charging_diag = ChargingDiagnostic::evaluate(pd_port, s.cable.as_ref());
         }
 
-        // Sourcing detection — power role is "source" with no source-caps
-        // (we're not the charger, we're the source).
+        // Live UCSI wattage (`voltage_now × current_now`) is the ground truth
+        // when present. Crucially it is published on the `ucsi-source-psy`
+        // power-supply, which is attached to the Type-C port directly — it does
+        // NOT require a `source-capabilities` directory or a linked
+        // `usb_power_delivery` node, and on many laptops the kernel exposes
+        // neither (the `pdN` device carries no `parent_port`, so it never pairs
+        // with a port). Reading it off `port.power_supply` rather than gating it
+        // behind `s.power_delivery` is what makes a live contract show up — e.g.
+        // a phone sourcing 5V @ 3A into the port, where the only evidence is the
+        // online PSY. That PSY reads non-zero only while the partner is actively
+        // sourcing (i.e. we are the sink), so attribute it by the power role.
+        let live_mw = port
+            .power_supply
+            .as_ref()
+            .and_then(|psy| psy.negotiated_power_mw())
+            .filter(|&mw| mw > 0)
+            .map(|mw| mw as u32);
+
         if power_role_str.eq_ignore_ascii_case("source") && sink_power_mw == 0 {
-            // Pull a rough estimate of out-bound power from the UCSI live
-            // readout if available; else leave as zero and let the role flag carry.
-            if let Some(psy) = &port.power_supply {
-                if let Some(live_mw) = psy.negotiated_power_mw() {
-                    if live_mw > 0 {
-                        source_power_mw = live_mw as u32;
-                    }
-                }
-            }
+            // We're the source: power flows out. UCSI seldom measures the
+            // outbound direction, so this is usually 0 and the role flag carries.
+            source_power_mw = live_mw.unwrap_or(0);
             s.status = Status::Sourcing;
+        } else if let Some(mw) = live_mw {
+            // Sink with a live contract: inbound power. Overrides any advertised
+            // PDO estimate above with the measured value.
+            sink_power_mw = mw;
+            s.status = Status::Charging;
         }
 
         let role = if sink_power_mw > 0 {
@@ -1326,6 +1333,33 @@ mod tests {
         assert_eq!(s.subtitle, "Nothing connected");
         assert_eq!(s.status, Status::Empty);
         assert_eq!(s.power.power_role, PowerRole::Unknown);
+    }
+
+    #[test]
+    fn live_ucsi_power_reported_without_linked_pd_port() {
+        // Real-hardware regression: a partner sourcing 5V @ 3A into a port the
+        // laptop sinks on. The kernel exposes the live wattage only through the
+        // online `ucsi-source-psy` — there is no `source-capabilities` directory
+        // and no `usb_power_delivery` node paired to the port (so
+        // `power_delivery` is None). The 15W must still surface as inbound power.
+        let port = TypeCPort {
+            port_number: 1,
+            data_role: "host [device]".into(),
+            power_role: "source [sink]".into(),
+            partner: Some(crate::typec::TypeCPartner::default()),
+            power_supply: Some(TypeCPowerSupply {
+                online: true,
+                voltage_now_uv: Some(5_000_000),
+                current_now_ua: Some(3_000_000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, None);
+        assert_eq!(s.power.power_role, PowerRole::Sink);
+        assert_eq!(s.power.power_in_mw, 15_000);
+        assert_eq!(s.power.power_out_mw, 0);
+        assert_eq!(s.status, Status::Charging);
     }
 
     #[test]
