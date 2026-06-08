@@ -7,7 +7,7 @@
 //! Optional D-Bus interface for `usbeehive`.
 //!
 //! Compiled only when the `dbus` Cargo feature is enabled. Hosts the
-//! `org.usbeehive.Devices3` interface backing the `usbeehived` daemon, plus
+//! `org.usbeehive.Devices4` interface backing the `usbeehived` daemon, plus
 //! the wire types ([`DeviceEntry`], [`PowerEntry`], [`DiagnosticEntry`])
 //! clients receive.
 //!
@@ -20,7 +20,7 @@
 //!
 //! Bus name: `org.usbeehive.Devices`
 //! Object path: `/org/usbeehive/Devices`
-//! Interface: `org.usbeehive.Devices3`
+//! Interface: `org.usbeehive.Devices4`
 //!
 //! ## `ListDevices` element shape
 //!
@@ -67,22 +67,22 @@
 //! | `CapabilityDegraded` (signal) | `(iss)` | `(port_number, summary, detail)` when a port's charging diagnostic newly raises `is_warning`. |
 //! | `CapabilityRestored` (signal) | `i` | `port_number` whose previous warning has cleared. |
 //!
-//! # Migrating from `Devices2`
+//! # Migrating from `Devices3`
 //!
-//! Hard cut — `Devices2` is gone, no alias. Clients must:
+//! Hard cut — `Devices3` is gone, no alias. The per-entry signature and
+//! every method/signal are unchanged; the break is confined to two
+//! `properties` machine-key renames that fix misleading names. Both keys
+//! carry a *declared maximum*, not a live reading, and were being read as
+//! live current — the new names say so. Clients must:
 //!
-//! 1. Update the proxy/`Connect` call to use `org.usbeehive.Devices3`.
-//! 2. Append two trailing fields to the per-entry signature: `pdo_list`
-//!    (`a(usuuuub)`) and `active_pdo_index` (`i`). The full signature is
-//!    `a(ssssssssssqqsa(ss)ius(uus)(bsssb)a(usuuuub)i)`.
-//! 3. Read the new structured PDO list directly from `pdo_list` —
-//!    the legacy `charger_max` property key is retained for stringly
-//!    consumers but is now advisory.
-//! 4. Use the new `cable.trust.{zero_vid,vid_unknown,reserved_bits}`
-//!    keys to surface a cable trust card; the keys are only present
-//!    when their flag fires.
-//! 5. Use the new `transport.{usb2,usb3,tb,dp_altmode}` keys to surface
-//!    active-transport badges; same fire-only convention.
+//! 1. Update the proxy/`Connect` call to use `org.usbeehive.Devices4`.
+//! 2. `usb_power_ma` → `usb_max_power_ma` — the USB `bMaxPower` descriptor
+//!    draw ceiling (raw mA, 5 V assumed), not the instantaneous draw.
+//! 3. `cable_current` → `cable_max_current` — the cable e-marker current
+//!    *rating*, now parallel to its sibling `cable_max_power`.
+//!
+//! There is no value or signature change beyond the key strings; a client
+//! that still queries the old keys simply stops finding those two rows.
 //!
 //! ## Enum extensibility convention
 //!
@@ -333,7 +333,7 @@ impl State {
     }
 }
 
-/// `org.usbeehive.Devices3` interface implementation.
+/// `org.usbeehive.Devices4` interface implementation.
 pub struct DevicesIface {
     /// Shared state backing every method call.
     pub state: Arc<Mutex<State>>,
@@ -365,7 +365,7 @@ impl DevicesIface {
     }
 }
 
-#[interface(name = "org.usbeehive.Devices3")]
+#[interface(name = "org.usbeehive.Devices4")]
 impl DevicesIface {
     /// Return one [`DeviceEntry`] per summary in the latest snapshot.
     fn list_devices(&self) -> Vec<DeviceEntry> {

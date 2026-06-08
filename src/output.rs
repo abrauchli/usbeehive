@@ -25,12 +25,12 @@ fn property_label(key: &str) -> String {
         "plug_orientation" => "Plug orientation".into(),
         "pd_contract" => "PD contract".into(),
         "cable_speed" => "Cable speed".into(),
-        "cable_current" => "Cable current".into(),
+        "cable_max_current" => "Cable max current".into(),
         "cable_max_power" => "Cable max power".into(),
         "cable_type" => "Cable type".into(),
         "cable_vendor" => "Cable vendor".into(),
         "charger_max" => "Charger max".into(),
-        "usb_power_ma" => "Bus power (mA)".into(),
+        "usb_max_power_ma" => "Max bus power (mA)".into(),
         other => other.into(),
     }
 }
@@ -139,8 +139,8 @@ fn print_text_iter<W: Write>(
             writeln!(w, "  {DIM}• {RESET}Sourcing out: {w_out}W")?;
         }
         for (key, value) in &dev.properties {
-            // `usb_power_ma` is shown in mA — the daemon emits the raw
-            // descriptor value, so don't multiply.
+            // `usb_max_power_ma` is shown in mA — the daemon emits the raw
+            // descriptor value (bMaxPower), so don't multiply.
             write_property(w, key, value)?;
         }
         if let Some(diag) = &dev.charging_diag {

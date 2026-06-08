@@ -5,6 +5,64 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-08
+
+### Changed (breaking — D-Bus interface)
+
+**D-Bus interface bumped `org.usbeehive.Devices3` → `org.usbeehive.Devices4`,
+hard cut, no alias.** `BUS_NAME` (`org.usbeehive.Devices`), `OBJECT_PATH`
+(`/org/usbeehive/Devices`), the 21-field per-entry signature, and every
+method/signal are all unchanged. The break is confined to two `properties`
+machine-key renames. Both keys were being read as live measurements when
+each is in fact a *declared maximum*, so the names now say so:
+
+- `usb_power_ma` → `usb_max_power_ma` — the USB `bMaxPower` descriptor draw
+  ceiling (raw mA, 5 V assumed), not the instantaneous draw.
+- `cable_current` → `cable_max_current` — the cable e-marker current
+  *rating*, now parallel to its honest sibling `cable_max_power`.
+
+The CLI text renderer relabels them to **"Max bus power (mA)"** and
+**"Cable max current"** to match. The [usbee](https://github.com/abrauchli/usbee)
+GNOME extension consumes the new keys as of its matching release and
+requires `usbeehived` ≥ 0.9.0. A client that still queries the old key
+strings simply stops finding those two rows — no value or signature change.
+
+### Added
+
+- **Pretty CLI labels for `transport.*` / `cable.trust.*` flag properties.**
+  The boolean machine-key flags introduced by the 0.7.0 / 0.8.0 wire bumps
+  (USB 2.0/3.x/4 link, DisplayPort / Thunderbolt 3 altmode, cable-trust
+  zero-VID / unknown-VID / reserved-bits-set warnings) were falling through
+  to their raw `key: true` form in the text renderer. A new
+  `property_flag_label` plus a central `write_property` renderer now emit
+  English labels, drop the trailing `: true` on flag keys, and color the
+  `cable.trust.*` authenticity warnings YELLOW. Value-bearing and unknown
+  keys keep their existing `Label: value` / raw passthrough, so daemon-side
+  additions still render without a CLI change.
+
+### Fixed
+
+- **Live UCSI wattage is now reported even without a linked PD port.** On
+  laptops where the kernel exposes no source-capabilities directory and the
+  `pdN` nodes carry no `parent_port`, a real contract (e.g. a phone sourcing
+  5V @ 3A) was dropped because the live reading was only consulted under
+  `if let Some(pd_port)`. The port came out `power_in_mw=0`, got filtered
+  out by usbee, and rendered "Powering 0.0 W". The live wattage is now read
+  straight off `port.power_supply` and attributed by `power_role`,
+  independent of PD-node linkage.
+- **Friendlier headline when the iProduct descriptor is empty.** Built-in
+  chips with no iProduct string (e.g. Intel's `8087:0029` Bluetooth radio)
+  were headlined as the bare `VID:PID`. `DeviceSummary.headline` now falls
+  back through `"<vendor> <class>"` → `"<class>"` → `"<vendor>"` →
+  `"<vid>:<pid>"`. The topology tree view still uses the stable `vid:pid`
+  identifier deliberately.
+
+### Internal
+
+- D-Bus integration tests for `transport.usb4` and active-PDO inference.
+- Documented the `--features dbus` install path for the usbee GNOME extension.
+- CI: force JavaScript actions onto Node.js 24; `cargo fmt` format-check fix.
+
 ## [0.8.0] - 2026-05-26
 
 ### Added
@@ -460,6 +518,10 @@ For library consumers:
 - Cast signal handler through `*const ()` for clippy fn-to-int lint.
 - Re-enable `watch` feature by default.
 
+[0.9.0]: https://github.com/abrauchli/usbeehive/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/abrauchli/usbeehive/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/abrauchli/usbeehive/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/abrauchli/usbeehive/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/abrauchli/usbeehive/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/abrauchli/usbeehive/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/abrauchli/usbeehive/compare/v0.3.1...v0.4.0

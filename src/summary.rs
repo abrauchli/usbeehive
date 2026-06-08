@@ -129,7 +129,7 @@ pub enum PowerRole {
 /// power right now". `power_out_mw > 0` ⟺ "this port is actively
 /// sourcing PD power right now". Both zero for non-PD-capable entries
 /// (plain USB devices, hubs). For plain USB device descriptor draw see
-/// the `usb_power_ma` entry in [`DeviceSummary::properties`].
+/// the `usb_max_power_ma` entry in [`DeviceSummary::properties`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct PowerSummary {
     /// Power flowing into the host from this port, in milliwatts. Zero
@@ -613,7 +613,7 @@ impl DeviceSummary {
             properties.push(("drivers".into(), drivers.join(", ")));
         }
         if dev.max_power_ma > 0 {
-            properties.push(("usb_power_ma".into(), dev.max_power_ma.to_string()));
+            properties.push(("usb_max_power_ma".into(), dev.max_power_ma.to_string()));
         }
 
         // Transport flags — only emit booleans that fire. USB devices can't
@@ -763,7 +763,7 @@ impl DeviceSummary {
             }
             if let Some(curr) = c.current_rating {
                 s.properties.push((
-                    "cable_current".into(),
+                    "cable_max_current".into(),
                     crate::pd::cable_current_label(curr).into(),
                 ));
             }
@@ -927,12 +927,12 @@ mod tests {
         assert_eq!(s.usb_version, "2.1");
         assert_eq!(s.device_class, DeviceClass::Phone);
         assert_eq!(s.category, Category::UsbDevice);
-        // usb_power_ma surfaces in properties, not in `power`.
+        // usb_max_power_ma surfaces in properties, not in `power`.
         assert_eq!(s.power.power_in_mw, 0);
         assert!(s
             .properties
             .iter()
-            .any(|(k, v)| k == "usb_power_ma" && v == "500"));
+            .any(|(k, v)| k == "usb_max_power_ma" && v == "500"));
     }
 
     #[test]
@@ -1519,7 +1519,7 @@ mod tests {
         assert!(p
             .get("cable_speed")
             .is_some_and(|v| v.contains("3.2 Gen 2")));
-        assert_eq!(p.get("cable_current").copied(), Some("5A"));
+        assert_eq!(p.get("cable_max_current").copied(), Some("5A"));
         assert_eq!(p.get("cable_max_power").copied(), Some("100W"));
         assert_eq!(p.get("cable_type").copied(), Some("passive"));
         assert_eq!(p.get("cable_vendor").copied(), Some("Apple"));

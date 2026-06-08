@@ -9,7 +9,7 @@
 //! ```
 //!
 //! Lists every device the daemon knows about, exercising every
-//! structured field on the Devices3 wire (`device_class`, `usb_version`,
+//! structured field on the Devices4 wire (`device_class`, `usb_version`,
 //! `link_speed_mbps`, `power`, `charging_diag`, `properties`), then
 //! calls `Diagnose(0)` to show the per-port lookup still returns the
 //! same data on its own.
@@ -20,7 +20,7 @@ use zbus::blocking::Proxy;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let conn = Connection::session()?;
-    let proxy = Proxy::new(&conn, BUS_NAME, OBJECT_PATH, "org.usbeehive.Devices3")?;
+    let proxy = Proxy::new(&conn, BUS_NAME, OBJECT_PATH, "org.usbeehive.Devices4")?;
 
     let entries: Vec<DeviceEntry> = proxy.call("ListDevices", &())?;
     println!("== {} device(s) ==", entries.len());

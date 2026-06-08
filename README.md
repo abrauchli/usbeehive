@@ -114,7 +114,7 @@ consumers pull in only what they need.
 | `sysfs` | yes | `Sysfs` handle + `DeviceManager` — Linux `/sys` enumeration with injectable root. |
 | `watch` | yes | libudev hotplug monitor: `watch::Watcher` + `watch::run_loop`. |
 | `cli` | yes | The `usbeehive` binary (clap + JSON / text rendering). |
-| `dbus` | no | `usbeehive::dbus` interface module + the `usbeehived` daemon binary publishing `org.usbeehive.Devices3` on the session bus (implies `watch`). |
+| `dbus` | no | `usbeehive::dbus` interface module + the `usbeehived` daemon binary publishing `org.usbeehive.Devices4` on the session bus (implies `watch`). |
 
 Library-only consumers can drop the binary deps:
 
@@ -185,7 +185,7 @@ cargo build --release --no-default-features --features dbus
 Building the `dbus` feature requires a C compiler (`cc`) and the `libudev`
 development headers — on Ubuntu / Debian: `sudo apt install gcc libudev-dev`.
 
-Wire surface — `org.usbeehive.Devices3` at `/org/usbeehive/Devices`:
+Wire surface — `org.usbeehive.Devices4` at `/org/usbeehive/Devices`:
 
 Each `ListDevices` entry is a 21-field tuple:
 `(id, category, device_class, device_subclass, status, headline, subtitle, icon, vendor, product, vendor_id, product_id, primary_driver, properties, port_number, link_speed_mbps, usb_version, power, charging_diag, pdo_list, active_pdo_index)`. See [`src/dbus.rs`](src/dbus.rs) module docs for per-field semantics.
@@ -206,19 +206,26 @@ Quick poke from the shell:
 ```sh
 gdbus call --session --dest org.usbeehive.Devices \
     --object-path /org/usbeehive/Devices \
-    --method org.usbeehive.Devices3.ListDevices
+    --method org.usbeehive.Devices4.ListDevices
 ```
 
 A minimal Rust client lives in [`examples/dbus_client.rs`](examples/dbus_client.rs).
 
-### Devices3 migration
+### Devices4 migration
 
-`Devices2` was retired in favor of `Devices3` — clients must update the
-interface name and append two trailing fields to the per-entry payload
-(`pdo_list`, `active_pdo_index`). Adding new enum variants
-(`device_class`, `status`, `power_role`, `bottleneck`) is non-breaking;
-clients MUST treat any unrecognized string as `Unknown` / fall back to
-category-based behavior. New machine-keyed properties
+`Devices3` was retired in favor of `Devices4` — a narrow break that only
+renames two `properties` machine-keys to stop them reading as live
+measurements (both are declared maxima, not instantaneous draw):
+
+- `usb_power_ma` → `usb_max_power_ma` (USB `bMaxPower` descriptor ceiling)
+- `cable_current` → `cable_max_current` (cable e-marker current rating,
+  now parallel to `cable_max_power`)
+
+Update the interface name and the two key strings; the per-entry
+signature and every method/signal are otherwise unchanged. Adding new
+enum variants (`device_class`, `status`, `power_role`, `bottleneck`) is
+non-breaking; clients MUST treat any unrecognized string as `Unknown` /
+fall back to category-based behavior. Machine-keyed flag properties
 (`cable.trust.*`, `transport.*`) are pushed only when their flag fires —
 absence is the "off" state. The CHANGELOG has the full break-by-break
 migration table.
