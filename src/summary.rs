@@ -667,11 +667,13 @@ impl DeviceSummary {
     }
 
     /// Build a summary for a [`TypeCPort`], optionally enriched with the
-    /// companion PD port and cable view.
+    /// companion PD port, cable view, and the correlated USB device (matched
+    /// via the partner's USB child node).
     pub fn from_typec_port(
         port: &TypeCPort,
         pd: Option<PowerDeliveryPort>,
         cable_info: Option<CableInfo>,
+        usb: Option<&UsbDevice>,
     ) -> DeviceSummary {
         let mut s = DeviceSummary {
             category: Category::TypeCPort,
@@ -705,6 +707,7 @@ impl DeviceSummary {
 
         if let Some(partner) = &port.partner {
             if let Some(&vdo) = partner.identity.as_ref().and_then(|id| id.vdos.first()) {
+                // Precedence 1: identity VDO label — wins when present.
                 let hdr = decode_id_header(vdo);
                 let product_label = product_type_label(
                     hdr.ufp_product_type
@@ -718,7 +721,26 @@ impl DeviceSummary {
                     s.vendor = vendor_label.clone();
                     s.subtitle = format!("{vendor_label} — {product_label}");
                 }
+            } else if let Some(d) = usb {
+                // Precedence 2: USB product string — the no-identity enrichment
+                // path (e.g. a PD 2.0 phone that skips Discover Identity).
+                // Prefer "{manufacturer} {product}" when both are present;
+                // fall back to whichever is non-empty; final fall-through to
+                // "Device connected" when both are empty.
+                let mfr_ne = !d.manufacturer.is_empty();
+                let prd_ne = !d.product.is_empty();
+                if mfr_ne && prd_ne {
+                    s.subtitle = format!("{} {}", d.manufacturer, d.product);
+                } else if prd_ne {
+                    s.subtitle = d.product.clone();
+                } else if mfr_ne {
+                    s.subtitle = d.manufacturer.clone();
+                } else {
+                    // Precedence 3: both USB strings empty — final fallback.
+                    s.subtitle = "Device connected".into();
+                }
             } else {
+                // Precedence 3: no identity VDO and no USB device — final fallback.
                 s.subtitle = "Device connected".into();
             }
         }
@@ -731,6 +753,17 @@ impl DeviceSummary {
         if !port.power_op_mode.is_empty() {
             s.properties
                 .push(("power_mode".into(), port.power_op_mode.clone()));
+        }
+
+        // Cross-reference to the correlated USB device using the stable-id
+        // form `usb:<bus_port>` (matches the daemon id convention in
+        // src/dbus.rs: `usb:<bus_port>`), so a UI can resolve the linked
+        // entry by id. Reverse link (a `typec_port` property on the USB
+        // entry) is omitted — `from_usb_device` has no port context, and
+        // threading it is not cheap; the forward cross-ref is sufficient.
+        if let Some(d) = usb {
+            s.properties
+                .push(("usb_device".into(), format!("usb:{}", d.bus_port)));
         }
 
         // Live PD contract — only when actually online.
@@ -1398,7 +1431,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, None);
+        let s = DeviceSummary::from_typec_port(&port, None, None, None);
         assert!(s
             .properties
             .iter()
@@ -1415,7 +1448,7 @@ mod tests {
             port_number: 1,
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, None);
+        let s = DeviceSummary::from_typec_port(&port, None, None, None);
         assert_eq!(s.headline, "USB-C Port 1");
         assert_eq!(s.subtitle, "Nothing connected");
         assert_eq!(s.status, Status::Empty);
@@ -1442,7 +1475,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, None);
+        let s = DeviceSummary::from_typec_port(&port, None, None, None);
         assert_eq!(s.power.power_role, PowerRole::Sink);
         assert_eq!(s.power.power_in_mw, 15_000);
         assert_eq!(s.power.power_out_mw, 0);
@@ -1469,7 +1502,7 @@ mod tests {
             max_source_power_mw: 100_000,
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
         assert_eq!(s.status, Status::Charging);
         assert!(s
             .properties
@@ -1513,7 +1546,7 @@ mod tests {
             max_source_power_mw: 65_000,
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
         assert_eq!(s.status, Status::Charging);
         assert_eq!(s.power.power_in_mw, 15_000);
         assert_eq!(s.power.contract_mw, 65_000);
@@ -1586,7 +1619,7 @@ mod tests {
             max_source_power_mw: 100_000,
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
         let pd_out = s.power_delivery.as_ref().unwrap();
         assert!(!pd_out.source_capabilities[0].is_active);
         assert!(!pd_out.source_capabilities[1].is_active);
@@ -1617,7 +1650,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
         assert!(!s.power_delivery.as_ref().unwrap().source_capabilities[0].is_active);
     }
 
@@ -1648,7 +1681,7 @@ mod tests {
             speed: Some(CableSpeed::Usb20),
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, Some(cable));
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable), None);
         assert!(s
             .properties
             .iter()
@@ -1668,7 +1701,7 @@ mod tests {
             speed: Some(CableSpeed::Usb32Gen2),
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, Some(cable));
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable), None);
         assert!(!s
             .properties
             .iter()
@@ -1688,7 +1721,7 @@ mod tests {
             speed: Some(CableSpeed::Usb20),
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, Some(cable));
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable), None);
         assert!(!s
             .properties
             .iter()
@@ -1717,7 +1750,7 @@ mod tests {
             max_source_power_mw: 65_000,
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
         assert!(s
             .properties
             .iter()
@@ -1745,7 +1778,7 @@ mod tests {
             max_source_power_mw: 15_000,
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
         assert!(!s.properties.iter().any(|(k, _)| k == "cable.no_emarker"));
     }
 
@@ -1774,7 +1807,7 @@ mod tests {
             max_watts: 100,
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, Some(pd), Some(cable));
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), Some(cable), None);
         assert!(!s.properties.iter().any(|(k, _)| k == "cable.no_emarker"));
     }
 
@@ -1795,7 +1828,7 @@ mod tests {
             vendor_name: "Apple".into(),
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, Some(cable));
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable), None);
         let p: std::collections::HashMap<_, _> = s
             .properties
             .iter()
@@ -1808,5 +1841,110 @@ mod tests {
         assert_eq!(p.get("cable_max_power").copied(), Some("100W"));
         assert_eq!(p.get("cable_type").copied(), Some("passive"));
         assert_eq!(p.get("cable_vendor").copied(), Some("Apple"));
+    }
+
+    fn pixel_usb_device() -> UsbDevice {
+        UsbDevice {
+            bus_port: "2-2".into(),
+            vendor_id: 0x18D1,
+            product_id: 0x4EE7,
+            product: "Pixel 7".into(),
+            manufacturer: String::new(),
+            speed: 10000,
+            ..Default::default()
+        }
+    }
+
+    fn partner_no_identity() -> crate::typec::TypeCPartner {
+        crate::typec::TypeCPartner {
+            usb_name: "2-2".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn usb_device_subtitle_when_no_identity() {
+        // Partner with no identity VDO + USB device → subtitle is the product string.
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(partner_no_identity()),
+            ..Default::default()
+        };
+        let usb = pixel_usb_device();
+        let s = DeviceSummary::from_typec_port(&port, None, None, Some(&usb));
+        assert_eq!(s.subtitle, "Pixel 7");
+        let p: std::collections::HashMap<_, _> = s
+            .properties
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(p.get("usb_device").copied(), Some("usb:2-2"));
+    }
+
+    #[test]
+    fn identity_vdo_wins_over_usb_string() {
+        // Partner with identity VDO (Hub) + a USB device → subtitle stays
+        // the identity label; usb_device property still present.
+        use crate::typec::TypeCIdentity;
+        // Build a Hub partner identity: ID Header with ufp_product_type=Hub
+        // (bits 29:27 = 0b001, product_type = Hub = 1). VID = 0x05AC (Apple).
+        // id_header encoding: bits 31:16 = nothing critical, bits 15:0 = VID.
+        // ufp_product_type in bits 29:27 of id_header. Hub = 1 → bits 29:27 = 001.
+        // So 0x0200_05AC | (1 << 27) = 0x0800_05AC.
+        let id_header_vdo: u32 = (1 << 27) | 0x05AC;
+        let identity = TypeCIdentity {
+            vendor_id: 0x05AC,
+            product_id: 0,
+            vdos: vec![id_header_vdo],
+        };
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(crate::typec::TypeCPartner {
+                usb_name: "2-2".into(),
+                identity: Some(identity),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let usb = pixel_usb_device();
+        let s = DeviceSummary::from_typec_port(&port, None, None, Some(&usb));
+        // Identity wins — subtitle is not "Pixel 7".
+        assert_ne!(s.subtitle, "Pixel 7");
+        assert!(!s.subtitle.is_empty());
+        // usb_device property still present.
+        assert!(s
+            .properties
+            .iter()
+            .any(|(k, v)| k == "usb_device" && v == "usb:2-2"));
+    }
+
+    #[test]
+    fn no_usb_device_falls_back_to_device_connected() {
+        // Partner with empty usb_name / usb = None → subtitle "Device connected".
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, None, None);
+        assert_eq!(s.subtitle, "Device connected");
+        assert!(!s.properties.iter().any(|(k, _)| k == "usb_device"));
+    }
+
+    #[test]
+    fn manufacturer_and_product_both_set_combined_with_space() {
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(partner_no_identity()),
+            ..Default::default()
+        };
+        let usb = UsbDevice {
+            bus_port: "2-2".into(),
+            product: "Pixel 7".into(),
+            manufacturer: "Google".into(),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, None, Some(&usb));
+        assert_eq!(s.subtitle, "Google Pixel 7");
     }
 }

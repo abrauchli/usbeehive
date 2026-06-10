@@ -31,6 +31,7 @@ fn property_label(key: &str) -> String {
         "cable_vendor" => "Cable vendor".into(),
         "charger_max" => "Charger max".into(),
         "usb_max_power_ma" => "Max bus power (mA)".into(),
+        "usb_device" => "USB device".into(),
         other => other.into(),
     }
 }
@@ -696,7 +697,7 @@ mod tests {
             data_role: "host [device]".into(),
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, None);
+        let s = DeviceSummary::from_typec_port(&port, None, None, None);
         assert_eq!(s.status, Status::Empty);
         let v = device_json(&s, false);
         assert_eq!(v["category"], "typec");
@@ -760,7 +761,7 @@ mod tests {
             max_source_power_mw: 100_000,
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
         let mut buf = Vec::new();
         print_text_iter(&mut buf, &[s], false).unwrap();
         let out = String::from_utf8_lossy(&buf);

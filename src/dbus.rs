@@ -42,7 +42,7 @@
 //! | 11 | `vendor_id` | `q` | `idVendor` (uint16). Zero for non-USB. |
 //! | 12 | `product_id` | `q` | `idProduct` (uint16). Zero for non-USB. |
 //! | 13 | `primary_driver` | `s` | Kernel driver bound to the device's first interface. Empty when unbound. |
-//! | 14 | `properties` | `a(ss)` | `(machine_key, value)` pairs. Adding keys is non-breaking; renaming/removing requires an interface bump. |
+//! | 14 | `properties` | `a(ss)` | `(machine_key, value)` pairs. Adding keys is non-breaking; renaming/removing requires an interface bump. Additive keys added in 0.10.0: `usb_device` = `usb:<bus_port>` of the enumerated USB device correlated to this Type-C port via the partner's USB child node; present only on `TypeCPort` entries whose partner enumerated a USB device; adding it is non-breaking. The new JSON-only `TypeCPartner.usb_name` field (the partner's USB child dir basename) is also surfaced through `SnapshotJson` (additive, serde default-empty). |
 //! | 15 | `port_number` | `i` | Type-C port number, `-1` otherwise. |
 //! | 16 | `link_speed_mbps` | `u` | Negotiated USB link speed in Mbps, `0` if unknown. |
 //! | 17 | `usb_version` | `s` | Canonical short form (`"2.0"`, `"3.2"`, `"4.0"`). Empty if unknown. |
@@ -511,7 +511,7 @@ mod tests {
             partner: Some(TypeCPartner::default()),
             ..Default::default()
         };
-        let s = DeviceSummary::from_typec_port(&port, None, None);
+        let s = DeviceSummary::from_typec_port(&port, None, None, None);
         let e = DeviceEntry::from(&s);
         assert_eq!(e.port_number, 7);
         assert_eq!(e.category, "TypeCPort");
@@ -560,7 +560,7 @@ mod tests {
             partner: Some(TypeCPartner::default()),
             ..Default::default()
         };
-        let mut s = DeviceSummary::from_typec_port(&port, None, None);
+        let mut s = DeviceSummary::from_typec_port(&port, None, None, None);
         s.status = Status::Charging;
         s.charging_diag = Some(ChargingDiagnostic {
             bottleneck: Bottleneck::CableLimit,
