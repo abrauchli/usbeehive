@@ -44,6 +44,29 @@ requires `usbeehived` ≥ 0.10.0.
 
 ### Added
 
+- **Type-C port ↔ USB device correlation via partner USB child node.**
+  `TypeCPartner` now carries `usb_name` — the basename of the kernel's
+  bus-port child directory under the partner sysfs dir (e.g. `"2-2"`),
+  the canonical port↔USB-device linkage. `build_summaries` uses it to
+  look up the correlated `UsbDevice` and passes it to `from_typec_port`.
+  Chargers enumerate no USB device so the lookup is a silent no-op there.
+  A new additive `usb_device` properties key carries `usb:<bus_port>` (the
+  stable-id cross-reference form) so UIs can link the two entries. No wire
+  change — additive key, `TypeCPartner.usb_name` is serde default-empty.
+- **USB product string subtitle fallback.** Partners with no PD Discover
+  Identity now show the USB product string as the subtitle (e.g. "Pixel 7")
+  instead of "Device connected". Precedence: identity VDO label >
+  USB product/manufacturer > "Device connected".
+- **Negotiated-speed refinement of `cable.data_speed_limit`.** A new
+  `negotiated_cable_speed` helper maps the correlated USB device's link
+  speed to a `CableSpeed` tier. The existing VDO-based trigger is
+  complemented by a confidence check (trigger b): when the partner
+  advertises more than the cable is rated for AND the link did not exceed
+  the cable's rating, the cable is observed evidence of the limit.
+  Negotiated speed alone is not a trigger — without the partner's
+  advertised capability there is no evidence the cable is implicated
+  (guards the Pixel-7 no-identity case from false positives).
+
 - **PD capabilities pair with ports via the partner's `usb_power_delivery`
   symlink.** Real kernels publish no `parent_port*` attribute on
   `/sys/class/usb_power_delivery/pdN` nodes — the partner directory's

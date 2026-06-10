@@ -666,6 +666,24 @@ impl DeviceSummary {
         }
     }
 
+    /// Map a negotiated USB link speed in Mbps to a comparable
+    /// [`crate::pd::CableSpeed`] tier.
+    ///
+    /// Thresholds mirror the single-lane Gbps buckets encoded by
+    /// `cable_speed_max_gbps`. Returns `None` for `0` (unknown — never
+    /// trigger on unknown speed).
+    fn negotiated_cable_speed(mbps: u32) -> Option<crate::pd::CableSpeed> {
+        use crate::pd::CableSpeed;
+        match mbps {
+            0 => None,
+            1..=4999 => Some(CableSpeed::Usb20),
+            5000..=9999 => Some(CableSpeed::Usb32Gen1),
+            10000..=19999 => Some(CableSpeed::Usb32Gen2),
+            20000..=39999 => Some(CableSpeed::Usb4Gen3),
+            _ => Some(CableSpeed::Usb4Gen4),
+        }
+    }
+
     /// Build a summary for a [`TypeCPort`], optionally enriched with the
     /// companion PD port, cable view, and the correlated USB device (matched
     /// via the partner's USB child node).
@@ -846,6 +864,19 @@ impl DeviceSummary {
         // e-marked cable is rated below it, the cable caps the link.
         // Capability property only — ChargingDiagnostic and
         // CapabilityDegraded stay charging-only.
+        //
+        // Two triggers (either fires the property, deduped):
+        //   (a) VDO trigger: partner_speed is Some(ps) AND cable_speed < ps.
+        //   (b) Negotiated-speed refinement: (a) is true AND negotiated <=
+        //       cable_speed — i.e. the link did not exceed the cable's rating,
+        //       confirming the cable is the observed bottleneck. Trigger (b)
+        //       is a confidence refinement of (a); both require cable_speed < ps.
+        //
+        // A negotiated speed alone is NOT a trigger: the link speed is the
+        // lesser of device + host-port capability, so without the partner's
+        // *advertised* capability there is no evidence the cable is implicated.
+        // Specifically this guards the Pixel-7 case (no identity VDO) from
+        // spuriously flagging the cable.
         if let (Some(partner), Some(cable_speed)) =
             (&port.partner, s.cable.as_ref().and_then(|c| c.speed))
         {
@@ -862,7 +893,26 @@ impl DeviceSummary {
                 })
                 .and_then(|id| id.vdos.get(3))
                 .and_then(|&vdo1| decode_ufp_vdo_highest_speed(vdo1));
-            if partner_speed.is_some_and(|ps| cable_speed < ps) {
+            // Trigger (a): VDO-based — cable rated below partner advertised speed.
+            // Trigger (b): negotiated-speed refinement — partner_speed Some(ps)
+            // AND cable_speed < ps AND negotiated <= cable_speed. The extra
+            // `negotiated <= cable_speed` clause confirms the link did not exceed
+            // the cable's rating; it guards against emitting on inconsistent data
+            // (e.g. a 10 Gbps negotiated link behind a USB 2.0 cable).
+            //
+            // Both triggers share the base condition `cable_speed < ps`, so (b)
+            // is always a strict subset of (a). Emitting on (a) covers both;
+            // (b) never independently fires. Negotiated-only is NOT a trigger:
+            // the link speed reflects the lesser of device + host-port capability;
+            // without the partner's *advertised* speed there is no evidence the
+            // cable is implicated. This guards the Pixel-7 no-identity case.
+            let negotiated = usb
+                .map(|d| d.speed)
+                .and_then(DeviceSummary::negotiated_cable_speed);
+            let vdo_trigger = partner_speed.is_some_and(|ps| cable_speed < ps);
+            // (b) adds a confidence check but does not suppress (a).
+            let negotiated_confirms = negotiated.is_some_and(|n| n <= cable_speed) && vdo_trigger;
+            if vdo_trigger || negotiated_confirms {
                 s.properties.push((
                     "cable.data_speed_limit".into(),
                     crate::pd::cable_speed_label(cable_speed).into(),
@@ -1726,6 +1776,166 @@ mod tests {
             .properties
             .iter()
             .any(|(k, _)| k == "cable.data_speed_limit"));
+    }
+
+    // --- Task 3: negotiated-speed cable cross-check tests ---
+
+    #[test]
+    fn negotiated_cable_speed_maps_thresholds() {
+        use crate::pd::CableSpeed;
+        assert_eq!(DeviceSummary::negotiated_cable_speed(0), None);
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(480),
+            Some(CableSpeed::Usb20)
+        );
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(4999),
+            Some(CableSpeed::Usb20)
+        );
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(5000),
+            Some(CableSpeed::Usb32Gen1)
+        );
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(9999),
+            Some(CableSpeed::Usb32Gen1)
+        );
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(10000),
+            Some(CableSpeed::Usb32Gen2)
+        );
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(19999),
+            Some(CableSpeed::Usb32Gen2)
+        );
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(20000),
+            Some(CableSpeed::Usb4Gen3)
+        );
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(39999),
+            Some(CableSpeed::Usb4Gen3)
+        );
+        assert_eq!(
+            DeviceSummary::negotiated_cable_speed(40000),
+            Some(CableSpeed::Usb4Gen4)
+        );
+    }
+
+    #[test]
+    fn cable_speed_limit_fires_with_vdo_gen2_partner_usb2_cable_negotiated_480() {
+        use crate::pd::CableSpeed;
+        // VDO Gen2 partner + USB 2.0 cable + negotiated 480 Mbps device.
+        // Both (a) and (b) agree → property present, value "USB 2.0".
+        let gen2_ufp_vdo = (0b011u32 << 29) | 2; // Peripheral UFP, Gen 2
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(peripheral_partner_with_ufp_vdo(gen2_ufp_vdo)),
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            speed: Some(CableSpeed::Usb20),
+            ..Default::default()
+        };
+        let usb = UsbDevice {
+            bus_port: "2-2".into(),
+            speed: 480,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable), Some(&usb));
+        assert!(
+            s.properties
+                .iter()
+                .any(|(k, v)| k == "cable.data_speed_limit" && v == "USB 2.0"),
+            "expected cable.data_speed_limit=USB 2.0"
+        );
+    }
+
+    #[test]
+    fn cable_speed_limit_absent_when_cable_matches_gen2_partner_negotiated_10000() {
+        use crate::pd::CableSpeed;
+        // VDO Gen2 partner + Gen2 cable + negotiated 10000 → absent.
+        let gen2_ufp_vdo = (0b011u32 << 29) | 2;
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(peripheral_partner_with_ufp_vdo(gen2_ufp_vdo)),
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            speed: Some(CableSpeed::Usb32Gen2),
+            ..Default::default()
+        };
+        let usb = UsbDevice {
+            bus_port: "2-2".into(),
+            speed: 10000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable), Some(&usb));
+        assert!(
+            !s.properties
+                .iter()
+                .any(|(k, _)| k == "cable.data_speed_limit"),
+            "cable.data_speed_limit must be absent"
+        );
+    }
+
+    #[test]
+    fn cable_speed_limit_absent_for_no_vdo_partner_with_negotiated_480_usb2_cable() {
+        use crate::pd::CableSpeed;
+        // No-VDO partner (PD 2.0 phone, partner_speed None) + USB 2.0 cable
+        // + negotiated 480 → absent (negotiated-only must not trigger).
+        let port = TypeCPort {
+            port_number: 0,
+            // No identity → partner_speed will be None
+            partner: Some(crate::typec::TypeCPartner::default()),
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            speed: Some(CableSpeed::Usb20),
+            ..Default::default()
+        };
+        let usb = UsbDevice {
+            bus_port: "2-2".into(),
+            speed: 480,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable), Some(&usb));
+        assert!(
+            !s.properties
+                .iter()
+                .any(|(k, _)| k == "cable.data_speed_limit"),
+            "negotiated-only must not trigger cable.data_speed_limit"
+        );
+    }
+
+    #[test]
+    fn cable_speed_limit_present_via_vdo_even_when_negotiated_exceeds_cable() {
+        use crate::pd::CableSpeed;
+        // VDO Gen2 partner + USB 2.0 cable but negotiated 10000 Mbps (link
+        // exceeded the e-marker rating — inconsistent data). Trigger (b) does
+        // NOT fire but trigger (a) does; property must still be present.
+        let gen2_ufp_vdo = (0b011u32 << 29) | 2;
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(peripheral_partner_with_ufp_vdo(gen2_ufp_vdo)),
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            speed: Some(CableSpeed::Usb20),
+            ..Default::default()
+        };
+        let usb = UsbDevice {
+            bus_port: "2-2".into(),
+            speed: 10000, // negotiated > cable_speed → (b) does not fire
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable), Some(&usb));
+        assert!(
+            s.properties
+                .iter()
+                .any(|(k, v)| k == "cable.data_speed_limit" && v == "USB 2.0"),
+            "trigger (a) must still fire even when negotiated exceeds cable speed"
+        );
     }
 
     #[test]
