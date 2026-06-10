@@ -157,6 +157,52 @@ fn partner_pd_name(partner_path: &Path) -> String {
     candidates.into_iter().next().unwrap_or_default()
 }
 
+/// Resolve the basename of the partner's enumerated USB device child
+/// directory (a `bus-port` like `"2-2"`) — the kernel's canonical linkage
+/// from a Type-C partner to its USB device node.
+///
+/// Scans the first (sorted) child of `partner_path` whose name matches the
+/// bus-port pattern `<digits>-<digits>(.<digits>)*` using byte checks (no
+/// regex). Returns an empty string when no match is found.
+fn partner_usb_name(partner_path: &Path) -> String {
+    let mut candidates: Vec<String> = reader::subdirs(partner_path)
+        .into_iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .filter(|n| is_bus_port_name(n))
+        .collect();
+    candidates.sort();
+    candidates.into_iter().next().unwrap_or_default()
+}
+
+/// Returns `true` when `s` matches the kernel bus-port pattern
+/// `<digits>-<port>` where `<port>` is `<digits>` optionally followed by
+/// `.<digits>` hub-chain groups (e.g. `"2-2"`, `"2-2.1.4"`).
+///
+/// Implemented with byte checks — the codebase avoids the regex crate.
+fn is_bus_port_name(s: &str) -> bool {
+    let b = s.as_bytes();
+    // Must have at least two bytes and contain a '-'.
+    let Some(dash) = b.iter().position(|&c| c == b'-') else {
+        return false;
+    };
+    if dash == 0 {
+        return false;
+    }
+    // Bus part (before '-'): all ASCII digits, non-empty.
+    if !b[..dash].iter().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    // Port part (after '-'): `<digits>` optionally followed by `.<digits>`
+    // groups. Split on '.' and verify each segment is non-empty all-digits.
+    let port_part = &s[dash + 1..];
+    if port_part.is_empty() {
+        return false;
+    }
+    port_part
+        .split('.')
+        .all(|seg| !seg.is_empty() && seg.bytes().all(|c| c.is_ascii_digit()))
+}
+
 /// Enumerate altmode sibling directories for a partner or cable.
 ///
 /// The kernel exposes alternate modes as siblings of the partner/cable
@@ -230,6 +276,7 @@ fn from_sysfs(path: &Path, name: &str, psy_root: &Path) -> Option<TypeCPort> {
         port.partner = Some(TypeCPartner {
             r#type: reader::read_attr(partner_path.join("type")).unwrap_or_default(),
             pd_name: partner_pd_name(&partner_path),
+            usb_name: partner_usb_name(&partner_path),
             identity: read_identity(&partner_path),
             altmodes: read_altmodes(path, &format!("{name}-partner")),
             raw_attributes: reader::read_all_attrs(&partner_path),
@@ -286,5 +333,82 @@ mod tests {
     fn missing_typec_dir_returns_empty() {
         let result = enumerate_in(Path::new("/no/such/usbeehive/path"), Path::new("/no/such"));
         assert!(result.is_empty());
+    }
+
+    // --- is_bus_port_name / partner_usb_name tests ---
+
+    #[test]
+    fn bus_port_name_accepts_simple() {
+        assert!(is_bus_port_name("2-2"));
+        assert!(is_bus_port_name("1-1"));
+        assert!(is_bus_port_name("10-3"));
+    }
+
+    #[test]
+    fn bus_port_name_accepts_hub_chain() {
+        assert!(is_bus_port_name("2-2.1.4"));
+        assert!(is_bus_port_name("1-1.2"));
+    }
+
+    #[test]
+    fn bus_port_name_rejects_non_matching() {
+        assert!(!is_bus_port_name("identity"));
+        assert!(!is_bus_port_name("pd1"));
+        assert!(!is_bus_port_name("port0-partner.0"));
+        assert!(!is_bus_port_name("foo"));
+        assert!(!is_bus_port_name(""));
+        assert!(!is_bus_port_name("-2"));
+        assert!(!is_bus_port_name("2-"));
+    }
+
+    fn make_tmp(label: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let pid = std::process::id();
+        let p = std::env::temp_dir().join(format!("usbee-typec-{label}-{pid}-{n}"));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    struct TmpDir(std::path::PathBuf);
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn partner_usb_name_finds_bus_port_child() {
+        let root = TmpDir(make_tmp("usb-name-a"));
+        let partner = root.0.join("port0-partner");
+        std::fs::create_dir_all(partner.join("2-2")).unwrap();
+        assert_eq!(partner_usb_name(&partner), "2-2");
+    }
+
+    #[test]
+    fn partner_usb_name_returns_empty_when_only_pd_node() {
+        let root = TmpDir(make_tmp("usb-name-b"));
+        let partner = root.0.join("port0-partner");
+        std::fs::create_dir_all(partner.join("pd1")).unwrap();
+        assert_eq!(partner_usb_name(&partner), "");
+    }
+
+    #[test]
+    fn partner_usb_name_hub_chain_returned_verbatim() {
+        let root = TmpDir(make_tmp("usb-name-c"));
+        let partner = root.0.join("port0-partner");
+        std::fs::create_dir_all(partner.join("2-2.1.4")).unwrap();
+        assert_eq!(partner_usb_name(&partner), "2-2.1.4");
+    }
+
+    #[test]
+    fn partner_usb_name_rejects_non_matching_names() {
+        let root = TmpDir(make_tmp("usb-name-d"));
+        let partner = root.0.join("port0-partner");
+        std::fs::create_dir_all(partner.join("identity")).unwrap();
+        std::fs::create_dir_all(partner.join("port0-partner.0")).unwrap();
+        std::fs::create_dir_all(partner.join("foo")).unwrap();
+        assert_eq!(partner_usb_name(&partner), "");
     }
 }

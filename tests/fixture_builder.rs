@@ -255,6 +255,18 @@ pub fn link_partner_pd(root: &Path, port_name: &str, pd_name: &str) {
     .unwrap();
 }
 
+/// Helper: create the USB-device child node in a partner directory the way
+/// the kernel exposes it — a plain subdirectory named after the USB
+/// bus-port position (e.g. `"2-2"`) directly under `<port>-partner/`.
+/// This is the canonical port↔USB-device linkage that `partner_usb_name`
+/// scans for.
+pub fn link_partner_usb(root: &Path, port_name: &str, bus_port: &str) {
+    let partner_dir = root
+        .join("class/typec")
+        .join(format!("{port_name}-partner"));
+    fs::create_dir_all(partner_dir.join(bus_port)).unwrap();
+}
+
 /// Helper: write a USB-PD port with `source-capabilities` PDOs.
 pub struct PdoFixture {
     pub voltage_mv: u32,

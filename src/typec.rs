@@ -47,6 +47,12 @@ pub struct TypeCPartner {
     /// (e.g. `"pd2"`) — the kernel's canonical linkage from a port to its
     /// PD capabilities node. Empty when no PD node is linked.
     pub pd_name: String,
+    /// Basename of the partner's enumerated USB device child directory (a
+    /// `bus-port` like `"2-2"`) — the kernel's canonical linkage from a
+    /// Type-C partner to its USB device node. Empty when the partner
+    /// enumerates no USB device (e.g. a charger).
+    #[serde(default)]
+    pub usb_name: String,
     /// Decoded Discover Identity, if the partner advertises one.
     pub identity: Option<TypeCIdentity>,
     /// Altmodes advertised by the partner (DisplayPort, Thunderbolt, …).

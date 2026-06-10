@@ -246,8 +246,18 @@ pub fn build_summaries(
                     None
                 }
             });
+        // Resolve the correlated USB device via the partner's USB child
+        // directory (e.g. `2-2`) — the kernel's canonical port↔USB-device
+        // linkage, same shape as the `usb_power_delivery` symlink pairing.
+        // Chargers enumerate no USB device, so `usb_name` is empty there
+        // and the lookup is a no-op.
+        let usb_match = tc
+            .partner
+            .as_ref()
+            .filter(|pa| !pa.usb_name.is_empty())
+            .and_then(|pa| usb.iter().find(|d| d.bus_port == pa.usb_name));
         let cable = tc.cable.as_ref().map(CableInfo::from_typec_cable);
-        let mut summary = DeviceSummary::from_typec_port(tc, pd_match, cable);
+        let mut summary = DeviceSummary::from_typec_port(tc, pd_match, cable, usb_match);
         // USB4 isn't an altmode — it's negotiated in PD enter-mode and only
         // surfaces through the `thunderbolt` subsystem. Fire `transport.usb4`
         // when the system has an active USB4 link AND this port has a
@@ -647,5 +657,55 @@ mod tests {
             .properties
             .iter()
             .any(|(k, _)| k == "transport.usb4"));
+    }
+
+    #[test]
+    fn usb_correlation_via_usb_name() {
+        // Port with a partner carrying usb_name "2-2" + a matching USB device
+        // → subtitle is the USB product string and usb_device property present.
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner {
+                usb_name: "2-2".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let usb_dev = crate::usb::UsbDevice {
+            bus_port: "2-2".into(),
+            product: "Pixel 7".into(),
+            ..Default::default()
+        };
+        let summaries = build_summaries(&[usb_dev], std::slice::from_ref(&port), &[], &[]);
+        let s = &summaries[0];
+        // Subtitle should be the USB product string.
+        assert_eq!(s.subtitle, "Pixel 7", "expected USB product subtitle");
+        // usb_device cross-ref property.
+        assert!(
+            s.properties
+                .iter()
+                .any(|(k, v)| k == "usb_device" && v == "usb:2-2"),
+            "expected usb_device property"
+        );
+    }
+
+    #[test]
+    fn usb_correlation_noop_for_charger_partner() {
+        // Charger port whose partner has empty usb_name → no usb_device property.
+        let charger_port = TypeCPort {
+            port_number: 1,
+            partner: Some(TypeCPartner {
+                usb_name: String::new(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let summaries = build_summaries(&[], std::slice::from_ref(&charger_port), &[], &[]);
+        let s = &summaries[0];
+        // usb_device property must be absent for a charger.
+        assert!(
+            !s.properties.iter().any(|(k, _)| k == "usb_device"),
+            "charger must not get usb_device property"
+        );
     }
 }
