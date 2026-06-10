@@ -55,8 +55,18 @@ requires `usbeehived` ≥ 0.10.0.
   spuriously pairing every unlinked PD node with Type-C port 0; it now
   defaults to `-1` ("not linked") as documented, and the sysfs reader
   parses the attribute when present.
-
-### Fixed
+- **No-e-marker 3A heuristic.** New `bottleneck` variant `CableNoEMarker`
+  (`is_warning == true`, covered by the unknown-variant fallback rule):
+  the sink's RDO current is pinned at 3A while the selected PDO offers
+  more and no cable e-marker is visible — the signature of a non-e-marked
+  cable, which the spec caps at 3A. Alongside it, a soft `properties` key
+  `cable.no_emarker = "true"` fires whenever a charger advertises >3A but
+  no e-marker rating is visible (phrased "not visible", never "missing" —
+  some UCSI firmwares don't populate cable nodes at all). The CLI renders
+  it as "No cable e-marker visible (3A limit may apply)". `DeviceLimit`
+  detail now carries the same benign hint as `SinkLimit` ("often the
+  device's own policy…") so a low contract doesn't read as a cable
+  accusation.
 
 - **PDO values now parse on real kernels.** The kernel's typec pd class
   formats PDO attributes with unit suffixes (`5000mV`, `3000mA`, `45000mW`)
@@ -74,7 +84,8 @@ requires `usbeehived` ≥ 0.10.0.
 ### Internal
 
 - `ChargingDiagnostic::evaluate` takes a third `requested_mw` argument
-  (the RDO operating power; pass `0` when unavailable).
+  (the RDO operating power; pass `0` when unavailable) and a fourth
+  `requested_ma` (the RDO operating current in mA; `0` = unknown).
 - `TypeCPowerSupply::negotiated_power_mw` and `PowerSummary` docs
   rewritten to state the negotiated-ceiling (not measurement) semantics;
   the misleading "live wattage is the ground truth" comment is gone.

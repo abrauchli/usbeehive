@@ -845,6 +845,18 @@ impl DeviceSummary {
             .filter(|&mw| mw > 0)
             .map(|mw| mw as u32);
 
+        // RDO operating current in mA — the second half of the UCSI
+        // operating point. Feeds the no-e-marker 3A heuristic: a request
+        // pinned at exactly 3A against a >3A PDO is the signature of a
+        // cable without an e-marker (3A by spec).
+        let requested_ma = port
+            .power_supply
+            .as_ref()
+            .and_then(|psy| psy.current_now_ua)
+            .filter(|&ua| ua > 0)
+            .map(|ua| (ua / 1000) as u32)
+            .unwrap_or(0);
+
         // PD source advertisement → sinking power (we're being charged).
         let mut sink_power_mw: u32 = 0;
         let mut source_power_mw: u32 = 0;
@@ -865,9 +877,32 @@ impl DeviceSummary {
                     .map(|p| p.power_mw);
                 contract_mw = active_pdo_mw.unwrap_or(0);
                 sink_power_mw = active_pdo_mw.unwrap_or(pd_port.max_source_power_mw);
+
+                // No e-marker visible while the charger advertises more
+                // than 3A somewhere in its caps: the cable may silently
+                // pin the contract at the spec's 3A default. Soft hint —
+                // some UCSI firmwares never populate cable nodes at all,
+                // so this means "not visible", never "missing".
+                let max_advertised_ma = pd_port
+                    .source_capabilities
+                    .iter()
+                    .map(|p| p.current_ma)
+                    .max()
+                    .unwrap_or(0);
+                if port.partner.is_some()
+                    && max_advertised_ma > 3_000
+                    && s.cable.as_ref().and_then(|c| c.current_rating).is_none()
+                {
+                    s.properties
+                        .push(("cable.no_emarker".into(), "true".into()));
+                }
             }
-            s.charging_diag =
-                ChargingDiagnostic::evaluate(pd_port, s.cable.as_ref(), requested_mw.unwrap_or(0));
+            s.charging_diag = ChargingDiagnostic::evaluate(
+                pd_port,
+                s.cable.as_ref(),
+                requested_mw.unwrap_or(0),
+                requested_ma,
+            );
         }
 
         if power_role_str.eq_ignore_ascii_case("source") && sink_power_mw == 0 {
@@ -1555,6 +1590,89 @@ mod tests {
         };
         let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
         assert!(!s.power_delivery.as_ref().unwrap().source_capabilities[0].is_active);
+    }
+
+    #[test]
+    fn cable_no_emarker_property_fires_for_big_charger_without_cable_node() {
+        // 65W charger (20V/3.25A top PDO) with no cable directory at all —
+        // the >3A advertisement is unreachable without an e-marked cable,
+        // so the soft hint must surface.
+        use crate::power::{PdoType, PowerDataObject};
+        let port = TypeCPort {
+            port_number: 1,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![PowerDataObject {
+                r#type: PdoType::FixedSupply,
+                voltage_mv: 20_000,
+                current_ma: 3_250,
+                power_mw: 65_000,
+                ..Default::default()
+            }],
+            max_source_power_mw: 65_000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        assert!(s
+            .properties
+            .iter()
+            .any(|(k, v)| k == "cable.no_emarker" && v == "true"));
+    }
+
+    #[test]
+    fn cable_no_emarker_property_silent_for_3a_only_charger() {
+        // A 15W charger never advertises beyond 3A — a non-e-marked cable
+        // costs nothing here, so the hint must stay quiet.
+        use crate::power::{PdoType, PowerDataObject};
+        let port = TypeCPort {
+            port_number: 1,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![PowerDataObject {
+                r#type: PdoType::FixedSupply,
+                voltage_mv: 5_000,
+                current_ma: 3_000,
+                power_mw: 15_000,
+                ..Default::default()
+            }],
+            max_source_power_mw: 15_000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        assert!(!s.properties.iter().any(|(k, _)| k == "cable.no_emarker"));
+    }
+
+    #[test]
+    fn cable_no_emarker_property_silent_when_emarker_rating_present() {
+        use crate::pd::CableCurrent;
+        use crate::power::{PdoType, PowerDataObject};
+        let port = TypeCPort {
+            port_number: 1,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![PowerDataObject {
+                r#type: PdoType::FixedSupply,
+                voltage_mv: 20_000,
+                current_ma: 5_000,
+                power_mw: 100_000,
+                ..Default::default()
+            }],
+            max_source_power_mw: 100_000,
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            current_rating: Some(CableCurrent::FiveAmp),
+            max_watts: 100,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), Some(cable));
+        assert!(!s.properties.iter().any(|(k, _)| k == "cable.no_emarker"));
     }
 
     #[test]

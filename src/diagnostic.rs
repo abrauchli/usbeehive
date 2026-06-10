@@ -18,6 +18,10 @@ pub enum Bottleneck {
     ChargerLimit,
     /// Cable e-marker advertises lower wattage than the charger can deliver.
     CableLimit,
+    /// Contract current pinned at 3A while the selected PDO offers more
+    /// and no cable e-marker is visible — cables without an e-marker are
+    /// limited to 3A by spec.
+    CableNoEMarker,
     /// The negotiated contract is well below what the charger can deliver.
     DeviceLimit,
     /// The contract is healthy but the sink is requesting much less than
@@ -53,12 +57,19 @@ impl ChargingDiagnostic {
     /// fine but the sink is asking for less" (benign sink policy, e.g. a
     /// battery charge limit).
     ///
+    /// `requested_ma` is the RDO operating current in mA (`current_now`
+    /// off the UCSI power-supply), `0` = unknown. A request pinned right
+    /// at 3A while the selected PDO offers more — with no cable e-marker
+    /// visible — is the signature of a non-e-marked cable, which the spec
+    /// caps at 3A.
+    ///
     /// Returns `None` when no source capabilities are advertised — without
     /// that we have no charger reference to compare against.
     pub fn evaluate(
         pd_port: &PowerDeliveryPort,
         cable: Option<&CableInfo>,
         requested_mw: u32,
+        requested_ma: u32,
     ) -> Option<ChargingDiagnostic> {
         if pd_port.source_capabilities.is_empty() {
             return None;
@@ -68,13 +79,12 @@ impl ChargingDiagnostic {
             return None;
         }
 
-        let active_w = pd_port
-            .source_capabilities
-            .iter()
-            .find(|p| p.is_active)
+        let active_pdo = pd_port.source_capabilities.iter().find(|p| p.is_active);
+        let active_w = active_pdo
             .map(|p| p.power_mw / 1000)
             .filter(|w| *w > 0)
             .unwrap_or(charger_max_w);
+        let active_ma = active_pdo.map(|p| p.current_ma).unwrap_or(0);
 
         let cable_max_w = cable.map(|c| c.max_watts).unwrap_or(0);
         let requested_w = requested_mw / 1000;
@@ -88,12 +98,31 @@ impl ChargingDiagnostic {
                 ),
                 is_warning: true,
             })
+        } else if cable.and_then(|c| c.current_rating).is_none()
+            && active_ma > 3_100
+            && (2_900..=3_100).contains(&requested_ma)
+        {
+            // Request pinned at 3A against a >3A PDO with no e-marker
+            // rating in sight (covers cable-absent too). Phrase as "not
+            // visible", never "missing" — some UCSI firmwares simply
+            // don't populate cable nodes.
+            Some(ChargingDiagnostic {
+                bottleneck: Bottleneck::CableNoEMarker,
+                summary: "Cable may be limiting current to 3A".into(),
+                detail: format!(
+                    "Contract offers {:.1}A but the device draws 3.0A and no cable e-marker \
+                     is visible — cables without an e-marker are limited to 3A",
+                    active_ma as f64 / 1000.0
+                ),
+                is_warning: true,
+            })
         } else if active_w > 0 && (active_w as f64) < (charger_max_w as f64) * 0.8 {
             Some(ChargingDiagnostic {
                 bottleneck: Bottleneck::DeviceLimit,
                 summary: format!("Contract limited to {active_w}W"),
                 detail: format!(
-                    "Negotiated {active_w}W of the {charger_max_w}W the charger offers"
+                    "Negotiated {active_w}W of the {charger_max_w}W the charger offers — \
+                     often the device's own policy (battery charge limit or thermal)"
                 ),
                 is_warning: false,
             })
@@ -144,13 +173,13 @@ mod tests {
 
     #[test]
     fn no_source_caps_returns_none() {
-        assert!(ChargingDiagnostic::evaluate(&PowerDeliveryPort::default(), None, 0).is_none());
+        assert!(ChargingDiagnostic::evaluate(&PowerDeliveryPort::default(), None, 0, 0).is_none());
     }
 
     #[test]
     fn zero_charger_returns_none() {
         let port = pd(vec![pdo(0, false)]);
-        assert!(ChargingDiagnostic::evaluate(&port, None, 0).is_none());
+        assert!(ChargingDiagnostic::evaluate(&port, None, 0, 0).is_none());
     }
 
     #[test]
@@ -160,7 +189,7 @@ mod tests {
             max_watts: 60,
             ..Default::default()
         };
-        let d = ChargingDiagnostic::evaluate(&port, Some(&cable), 0).unwrap();
+        let d = ChargingDiagnostic::evaluate(&port, Some(&cable), 0, 0).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::CableLimit);
         assert!(d.is_warning);
         assert!(d.detail.contains("60W"));
@@ -169,7 +198,7 @@ mod tests {
     #[test]
     fn device_limit_when_active_below_80pct() {
         let port = pd(vec![pdo(100_000, false), pdo(15_000, true)]);
-        let d = ChargingDiagnostic::evaluate(&port, None, 0).unwrap();
+        let d = ChargingDiagnostic::evaluate(&port, None, 0, 0).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::DeviceLimit);
         assert!(!d.is_warning);
         assert!(d.summary.contains("15W"));
@@ -178,7 +207,7 @@ mod tests {
     #[test]
     fn fine_when_active_meets_charger() {
         let port = pd(vec![pdo(60_000, true)]);
-        let d = ChargingDiagnostic::evaluate(&port, None, 0).unwrap();
+        let d = ChargingDiagnostic::evaluate(&port, None, 0, 0).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::Fine);
         assert!(d.summary.contains("60W"));
     }
@@ -190,7 +219,7 @@ mod tests {
             max_watts: 240,
             ..Default::default()
         };
-        let d = ChargingDiagnostic::evaluate(&port, Some(&cable), 0).unwrap();
+        let d = ChargingDiagnostic::evaluate(&port, Some(&cable), 0, 0).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::Fine);
         assert!(d.summary.contains("100W"));
     }
@@ -201,7 +230,7 @@ mod tests {
         // requests 15W in its RDO (e.g. a laptop with an 80% battery
         // charge limit). Benign — must not raise is_warning.
         let port = pd(vec![pdo(65_000, true)]);
-        let d = ChargingDiagnostic::evaluate(&port, None, 15_000).unwrap();
+        let d = ChargingDiagnostic::evaluate(&port, None, 15_000, 0).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::SinkLimit);
         assert!(!d.is_warning);
         assert!(d.summary.contains("15W"));
@@ -212,7 +241,7 @@ mod tests {
     fn sink_limit_not_raised_when_request_near_contract() {
         // Requesting 60W of a 65W contract (> 80%) is Fine, not SinkLimit.
         let port = pd(vec![pdo(65_000, true)]);
-        let d = ChargingDiagnostic::evaluate(&port, None, 60_000).unwrap();
+        let d = ChargingDiagnostic::evaluate(&port, None, 60_000, 0).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::Fine);
     }
 
@@ -225,7 +254,7 @@ mod tests {
             max_watts: 60,
             ..Default::default()
         };
-        let d = ChargingDiagnostic::evaluate(&port, Some(&cable), 10_000).unwrap();
+        let d = ChargingDiagnostic::evaluate(&port, Some(&cable), 10_000, 0).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::CableLimit);
         assert!(d.is_warning);
     }
@@ -235,7 +264,70 @@ mod tests {
         // Contract itself is low (15W of 100W) — that's the dominant
         // story even if the request is lower still.
         let port = pd(vec![pdo(100_000, false), pdo(15_000, true)]);
-        let d = ChargingDiagnostic::evaluate(&port, None, 5_000).unwrap();
+        let d = ChargingDiagnostic::evaluate(&port, None, 5_000, 0).unwrap();
         assert_eq!(d.bottleneck, Bottleneck::DeviceLimit);
+    }
+
+    fn pdo_with_current(power_mw: u32, current_ma: u32, active: bool) -> PowerDataObject {
+        PowerDataObject {
+            r#type: PdoType::FixedSupply,
+            current_ma,
+            power_mw,
+            is_active: active,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn cable_no_emarker_flagged_when_request_pinned_at_3a() {
+        // 20V/5A active PDO, no cable e-marker visible, sink draws exactly
+        // 3.0A — the signature of a non-e-marked cable (3A by spec).
+        let port = pd(vec![pdo_with_current(100_000, 5_000, true)]);
+        let d = ChargingDiagnostic::evaluate(&port, None, 60_000, 3_000).unwrap();
+        assert_eq!(d.bottleneck, Bottleneck::CableNoEMarker);
+        assert!(d.is_warning);
+        assert!(d.summary.contains("3A"));
+        assert!(d.detail.contains("5.0A"));
+    }
+
+    #[test]
+    fn cable_no_emarker_not_raised_when_emarker_rating_present() {
+        // Same pinned-3A picture but the cable carries a (low) e-marker
+        // rating — the existing CableLimit rule owns this case.
+        use crate::pd::CableCurrent;
+        let port = pd(vec![pdo_with_current(100_000, 5_000, true)]);
+        let cable = CableInfo {
+            current_rating: Some(CableCurrent::ThreeAmp),
+            max_watts: 60,
+            ..Default::default()
+        };
+        let d = ChargingDiagnostic::evaluate(&port, Some(&cable), 60_000, 3_000).unwrap();
+        assert_eq!(d.bottleneck, Bottleneck::CableLimit);
+    }
+
+    #[test]
+    fn cable_no_emarker_not_raised_when_request_above_3a() {
+        // 3.25A flowing proves the cable isn't 3A-limited — no hint.
+        let port = pd(vec![pdo_with_current(100_000, 5_000, true)]);
+        let d = ChargingDiagnostic::evaluate(&port, None, 65_000, 3_250).unwrap();
+        assert_ne!(d.bottleneck, Bottleneck::CableNoEMarker);
+    }
+
+    #[test]
+    fn cable_no_emarker_not_raised_when_pdo_offers_only_3a() {
+        // A 3A contract fully consumed is Fine, not a cable hint.
+        let port = pd(vec![pdo_with_current(60_000, 3_000, true)]);
+        let d = ChargingDiagnostic::evaluate(&port, None, 60_000, 3_000).unwrap();
+        assert_eq!(d.bottleneck, Bottleneck::Fine);
+    }
+
+    #[test]
+    fn device_limit_detail_carries_benign_hint() {
+        // On the live laptop a 5V/3A contract of a 65W advertisement is
+        // diagnosed DeviceLimit — it must not read as a cable accusation.
+        let port = pd(vec![pdo(65_000, false), pdo(15_000, true)]);
+        let d = ChargingDiagnostic::evaluate(&port, None, 0, 0).unwrap();
+        assert_eq!(d.bottleneck, Bottleneck::DeviceLimit);
+        assert!(d.detail.contains("battery charge limit or thermal"));
     }
 }

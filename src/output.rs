@@ -51,6 +51,8 @@ fn property_flag_label(key: &str) -> Option<&'static str> {
         "cable.trust.zero_vid" => "Cable trust: zero VID (likely counterfeit)",
         "cable.trust.vid_unknown" => "Cable trust: unknown VID",
         "cable.trust.reserved_bits" => "Cable trust: reserved bits set",
+        // A hint, not a trust warning — renders in the normal style.
+        "cable.no_emarker" => "No cable e-marker visible (3A limit may apply)",
         _ => return None,
     })
 }
@@ -620,6 +622,11 @@ mod tests {
         assert!(out.contains("zero VID"), "{out}");
         // Trust flags carry the YELLOW warning colour code.
         assert!(out.contains(YELLOW), "{out}");
+
+        // The no-e-marker hint is informational — label only, no yellow.
+        let out = render_property_string("cable.no_emarker", "true");
+        assert!(out.contains("No cable e-marker visible"), "{out}");
+        assert!(!out.contains(YELLOW), "{out}");
     }
 
     #[test]

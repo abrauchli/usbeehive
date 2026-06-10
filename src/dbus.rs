@@ -191,7 +191,8 @@ pub struct DiagnosticEntry {
     /// `true` when a diagnostic was computed.
     pub present: bool,
     /// Bottleneck variant name (`"NoCharger"`, `"ChargerLimit"`,
-    /// `"CableLimit"`, `"DeviceLimit"`, `"SinkLimit"`, `"Fine"`).
+    /// `"CableLimit"`, `"CableNoEMarker"`, `"DeviceLimit"`, `"SinkLimit"`,
+    /// `"Fine"`).
     pub bottleneck: String,
     /// One-line headline.
     pub summary: String,
