@@ -239,6 +239,22 @@ pub fn write_typec_partner(root: &Path, port_name: &str, partner_type: &str, vdo
     }
 }
 
+/// Helper: link a partner directory to its PD node the way real kernels
+/// do — a `usb_power_delivery` symlink inside `<port>-partner/` pointing
+/// at the `pdN` entry. Only the target's basename is read by the
+/// enumerator, so a relative target suffices.
+pub fn link_partner_pd(root: &Path, port_name: &str, pd_name: &str) {
+    let partner_dir = root
+        .join("class/typec")
+        .join(format!("{port_name}-partner"));
+    fs::create_dir_all(&partner_dir).unwrap();
+    std::os::unix::fs::symlink(
+        format!("../../usb_power_delivery/{pd_name}"),
+        partner_dir.join("usb_power_delivery"),
+    )
+    .unwrap();
+}
+
 /// Helper: write a USB-PD port with `source-capabilities` PDOs.
 pub struct PdoFixture {
     pub voltage_mv: u32,
@@ -256,24 +272,36 @@ pub fn write_pd_port(root: &Path, port_name: &str, parent_port: i32, source_pdos
     if parent_port >= 0 {
         write_attr(&dir, "parent_port_number", &parent_port.to_string());
     }
+    // Mirror the kernel's typec pd class output: values carry unit
+    // suffixes (`5000mV`, `3000mA`, `45000mW`) and a runtime-PM `power`
+    // directory sits next to the PDO entries.
+    fs::create_dir_all(caps.join("power")).unwrap();
     for (i, p) in source_pdos.iter().enumerate() {
         let entry = caps.join(format!("{}:fixed_supply", i + 1));
         fs::create_dir_all(&entry).unwrap();
         write_attr(&entry, "type", p.kind);
         if p.voltage_mv > 0 {
-            write_attr(&entry, "voltage", &p.voltage_mv.to_string());
+            write_attr(&entry, "voltage", &format!("{}mV", p.voltage_mv));
         }
         if p.min_voltage_mv > 0 {
-            write_attr(&entry, "minimum_voltage", &p.min_voltage_mv.to_string());
+            write_attr(
+                &entry,
+                "minimum_voltage",
+                &format!("{}mV", p.min_voltage_mv),
+            );
         }
         if p.max_voltage_mv > 0 {
-            write_attr(&entry, "maximum_voltage", &p.max_voltage_mv.to_string());
+            write_attr(
+                &entry,
+                "maximum_voltage",
+                &format!("{}mV", p.max_voltage_mv),
+            );
         }
         if p.current_ma > 0 {
-            write_attr(&entry, "maximum_current", &p.current_ma.to_string());
+            write_attr(&entry, "maximum_current", &format!("{}mA", p.current_ma));
         }
         if p.power_mw > 0 {
-            write_attr(&entry, "maximum_power", &p.power_mw.to_string());
+            write_attr(&entry, "maximum_power", &format!("{}mW", p.power_mw));
         }
     }
 }

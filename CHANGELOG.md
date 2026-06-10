@@ -42,6 +42,35 @@ gains `power.contractMW`. The [usbee](https://github.com/abrauchli/usbee)
 GNOME extension consumes the new wire as of its matching release and
 requires `usbeehived` ≥ 0.10.0.
 
+### Added
+
+- **PD capabilities pair with ports via the partner's `usb_power_delivery`
+  symlink.** Real kernels publish no `parent_port*` attribute on
+  `/sys/class/usb_power_delivery/pdN` nodes — the partner directory's
+  `usb_power_delivery` symlink (falling back to the `pdN` child directory)
+  is the canonical linkage, and it now takes precedence in pairing. On
+  multi-port machines the charger's full PDO list, `charger_max`, and the
+  inferred active PDO finally surface on the right port. Includes a bugfix:
+  `PowerDeliveryPort`'s derived `Default` left `parent_port_number` at `0`,
+  spuriously pairing every unlinked PD node with Type-C port 0; it now
+  defaults to `-1` ("not linked") as documented, and the sysfs reader
+  parses the attribute when present.
+
+### Fixed
+
+- **PDO values now parse on real kernels.** The kernel's typec pd class
+  formats PDO attributes with unit suffixes (`5000mV`, `3000mA`, `45000mW`)
+  and places a runtime-PM `power` directory inside `*-capabilities/`. The
+  reader expected bare integers (the test-fixture convention), so on live
+  hardware every PDO decoded as 0V/0A/0W plus one junk all-zero entry.
+  Suffixes are now tolerated, the `power` directory is skipped, and the
+  fixtures write kernel-style suffixed values. Likewise, real kernels
+  publish no `type` attribute and no parseable index where the reader
+  looked for them — both are encoded in the entry's directory name
+  (`5:programmable_supply`), which now drives the fallback, so PPS
+  profiles render their voltage range and `pdo_list[].index` is the
+  spec's 1-based position instead of a constant 0.
+
 ### Internal
 
 - `ChargingDiagnostic::evaluate` takes a third `requested_mw` argument

@@ -129,6 +129,34 @@ pub fn ucsi_controller(path: &str) -> Option<String> {
     }
 }
 
+/// Resolve the basename of the partner's `usb_power_delivery` symlink
+/// target (e.g. `"pd2"`) — the kernel's linkage from a partner to its
+/// node under `/sys/class/usb_power_delivery/`. The `pdN` nodes carry no
+/// `parent_port*` attribute, so this symlink is the only pairing signal
+/// on real kernels.
+///
+/// Fallback when the symlink is absent: the `pdN` device directory is a
+/// child of the partner directory (`.../port1-partner/pd2`), so scan for
+/// a subdirectory named `pd<digits>` and take the first (sorted) match.
+/// Both lookups are best-effort — failure returns an empty string.
+fn partner_pd_name(partner_path: &Path) -> String {
+    if let Ok(target) = std::fs::read_link(partner_path.join("usb_power_delivery")) {
+        if let Some(name) = target.file_name() {
+            return name.to_string_lossy().into_owned();
+        }
+    }
+    let mut candidates: Vec<String> = reader::subdirs(partner_path)
+        .into_iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .filter(|n| {
+            n.strip_prefix("pd")
+                .is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .collect();
+    candidates.sort();
+    candidates.into_iter().next().unwrap_or_default()
+}
+
 /// Enumerate altmode sibling directories for a partner or cable.
 ///
 /// The kernel exposes alternate modes as siblings of the partner/cable
@@ -201,6 +229,7 @@ fn from_sysfs(path: &Path, name: &str, psy_root: &Path) -> Option<TypeCPort> {
     if reader::path_exists(&partner_path) {
         port.partner = Some(TypeCPartner {
             r#type: reader::read_attr(partner_path.join("type")).unwrap_or_default(),
+            pd_name: partner_pd_name(&partner_path),
             identity: read_identity(&partner_path),
             altmodes: read_altmodes(path, &format!("{name}-partner")),
             raw_attributes: reader::read_all_attrs(&partner_path),

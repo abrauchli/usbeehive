@@ -82,7 +82,7 @@ impl PowerDataObject {
 }
 
 /// All PDOs published by one USB Power Delivery port.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PowerDeliveryPort {
     /// Absolute sysfs path of the port directory.
     pub sysfs_path: PathBuf,
@@ -104,6 +104,25 @@ pub struct PowerDeliveryPort {
 
     /// All regular files under the port directory.
     pub raw_attributes: BTreeMap<String, String>,
+}
+
+/// Manual impl so `parent_port_number` defaults to `-1` ("not linked") —
+/// the derived `Default` would yield `0`, which is a valid port number and
+/// spuriously pairs every unlinked PD node with Type-C port 0.
+impl Default for PowerDeliveryPort {
+    fn default() -> Self {
+        PowerDeliveryPort {
+            sysfs_path: PathBuf::default(),
+            name: String::default(),
+            parent_port_type: String::default(),
+            parent_port_number: -1,
+            source_capabilities: Vec::default(),
+            sink_capabilities: Vec::default(),
+            max_source_power_mw: 0,
+            active_source_pdo_index: None,
+            raw_attributes: BTreeMap::default(),
+        }
+    }
 }
 
 /// Voltage tolerance (mV) for matching a live measurement to an advertised

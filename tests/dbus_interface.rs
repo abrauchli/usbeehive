@@ -377,6 +377,97 @@ mod dbus_tests {
     }
 
     #[test]
+    fn list_devices_pairs_pd_via_partner_symlink_on_multiport_machine() {
+        // Mirrors the dev laptop exactly: two Type-C ports, a 65W charger
+        // on port1 whose pd node carries NO parent_port* attribute — the
+        // partner's `usb_power_delivery` symlink is the only linkage. The
+        // entry for port1 must carry the charger's pdo_list, charger_max,
+        // and (with the live UCSI voltage present) a resolved
+        // active_pdo_index; port0 must pair with nothing. Regression for
+        // the derived-Default bug that paired unlinked pd nodes with port 0.
+        let root = TempRoot::new("dbus-partner-symlink");
+        let controller = "USBC000:00";
+
+        write_typec_port(root.path(), "port0", &[("port_type", "dual")]);
+        write_typec_port_under_ucsi(
+            root.path(),
+            controller,
+            "port1",
+            &[
+                ("data_role", "host [device]"),
+                ("power_role", "source [sink]"),
+                ("port_type", "dual"),
+                ("orientation", "normal"),
+            ],
+        );
+        write_typec_partner(root.path(), "port1", "device", &[]);
+        link_partner_pd(root.path(), "port1", "pd2");
+
+        // Laptop parks on the 5V/3A contract while battery-charge-limited.
+        write_ucsi_source_psy(
+            root.path(),
+            controller,
+            2, // port_number 1 → directory suffix 2
+            &[
+                ("online", "1"),
+                ("voltage_now", "5000000"), // 5.0V in µV
+                ("current_now", "3000000"), // 3.0A in µA
+            ],
+        );
+
+        write_pd_port(
+            root.path(),
+            "pd2",
+            -1, // no parent_port_number attr written — like real kernels
+            &[
+                PdoFixture {
+                    voltage_mv: 5_000,
+                    current_ma: 3_000,
+                    power_mw: 15_000,
+                    kind: "fixed_supply",
+                    min_voltage_mv: 0,
+                    max_voltage_mv: 0,
+                },
+                PdoFixture {
+                    voltage_mv: 20_000,
+                    current_ma: 3_250,
+                    power_mw: 65_000,
+                    kind: "fixed_supply",
+                    min_voltage_mv: 0,
+                    max_voltage_mv: 0,
+                },
+            ],
+        );
+
+        let state = make_state(root.path());
+        {
+            let mut guard = state.lock().unwrap();
+            guard.refresh();
+        }
+        let iface = DevicesIface { state };
+        let entries = iface.snapshot_entries();
+
+        let port0 = entries.iter().find(|e| e.port_number == 0).unwrap();
+        assert!(
+            port0.pdo_list.is_empty(),
+            "unlinked pd node must not pair with port 0"
+        );
+        assert!(!port0.properties.iter().any(|(k, _)| k == "charger_max"));
+
+        let port1 = entries.iter().find(|e| e.port_number == 1).unwrap();
+        assert_eq!(port1.pdo_list.len(), 2);
+        let p: std::collections::HashMap<_, _> = port1
+            .properties
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(p.get("charger_max").copied(), Some("65W"));
+        // Live 5.0V UCSI reading → the 5V PDO (index 0) is active.
+        assert_eq!(port1.active_pdo_index, 0);
+        assert!(port1.pdo_list[0].is_active);
+    }
+
+    #[test]
     fn list_devices_emits_transport_usb4_when_link_is_usb4() {
         // End-to-end wire check: a Type-C port with a partner under a USB4
         // host (thunderbolt `0-0`, generation 4) and a USB4-capable connected

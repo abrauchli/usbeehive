@@ -43,6 +43,10 @@ pub struct TypeCAltMode {
 pub struct TypeCPartner {
     /// Kernel `type` attribute (e.g. `"upstream"`, `"downstream"`).
     pub r#type: String,
+    /// Basename of the partner's `usb_power_delivery` symlink target
+    /// (e.g. `"pd2"`) — the kernel's canonical linkage from a port to its
+    /// PD capabilities node. Empty when no PD node is linked.
+    pub pd_name: String,
     /// Decoded Discover Identity, if the partner advertises one.
     pub identity: Option<TypeCIdentity>,
     /// Altmodes advertised by the partner (DisplayPort, Thunderbolt, …).

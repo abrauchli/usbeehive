@@ -220,9 +220,24 @@ pub fn build_summaries(
     let usb4_link = thunderbolt::system_has_usb4_link(tb);
 
     for tc in ports {
+        // Pairing precedence:
+        //   1. The partner's `usb_power_delivery` symlink — the kernel's
+        //      canonical linkage; real `pdN` nodes carry no `parent_port*`
+        //      attribute, so this is the only signal on live hardware.
+        //   2. `parent_port_number` — the fixture convention; -1 ("not
+        //      linked") never matches a real port number.
+        //   3. Single-pd + single-port fallback.
         let pd_match = pd
             .iter()
-            .find(|p| p.parent_port_number == tc.port_number)
+            .find(|p| {
+                tc.partner
+                    .as_ref()
+                    .is_some_and(|pa| !pa.pd_name.is_empty() && pa.pd_name == p.name)
+            })
+            .or_else(|| {
+                pd.iter()
+                    .find(|p| p.parent_port_number >= 0 && p.parent_port_number == tc.port_number)
+            })
             .cloned()
             .or_else(|| {
                 if pd.len() == 1 && ports.len() == 1 {
@@ -326,6 +341,93 @@ mod tests {
         let summaries = build_summaries(&[], &[p0, p1], &[pd_for_p1], &[]);
         assert!(summaries[0].power_delivery.is_none());
         assert!(summaries[1].power_delivery.is_some());
+    }
+
+    #[test]
+    fn partner_symlink_pairs_pd_and_unlinked_pd_never_matches_port0() {
+        // Mirrors the real-laptop layout: two ports, charger on port1, and
+        // the pd nodes carry no parent_port_number (-1). The partner's
+        // pd_name is the only linkage. Regression: the derived Default
+        // used to leave parent_port_number at 0, spuriously pairing every
+        // unlinked pd node with port 0.
+        let p0 = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner::default()),
+            ..Default::default()
+        };
+        let p1 = TypeCPort {
+            port_number: 1,
+            partner: Some(TypeCPartner {
+                pd_name: "pd1".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pd0 = PowerDeliveryPort {
+            name: "pd0".into(),
+            parent_port_number: -1,
+            source_capabilities: vec![PowerDataObject {
+                power_mw: 45_000,
+                ..Default::default()
+            }],
+            max_source_power_mw: 45_000,
+            ..Default::default()
+        };
+        let pd1 = PowerDeliveryPort {
+            name: "pd1".into(),
+            parent_port_number: -1,
+            source_capabilities: vec![PowerDataObject {
+                power_mw: 65_000,
+                ..Default::default()
+            }],
+            max_source_power_mw: 65_000,
+            ..Default::default()
+        };
+        let summaries = build_summaries(&[], &[p0, p1], &[pd0, pd1], &[]);
+        assert!(
+            summaries[0].power_delivery.is_none(),
+            "unlinked pd node must not pair with port 0"
+        );
+        let paired = summaries[1].power_delivery.as_ref().unwrap();
+        assert_eq!(paired.name, "pd1");
+        assert_eq!(paired.max_source_power_mw, 65_000);
+    }
+
+    #[test]
+    fn partner_symlink_wins_over_parent_port_number() {
+        // Symlink linkage is the kernel's canonical signal — it must beat
+        // a (fixture-style) parent_port_number pointing elsewhere.
+        let p0 = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner {
+                pd_name: "pd1".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pd0 = PowerDeliveryPort {
+            name: "pd0".into(),
+            parent_port_number: 0,
+            source_capabilities: vec![PowerDataObject {
+                power_mw: 45_000,
+                ..Default::default()
+            }],
+            max_source_power_mw: 45_000,
+            ..Default::default()
+        };
+        let pd1 = PowerDeliveryPort {
+            name: "pd1".into(),
+            parent_port_number: -1,
+            source_capabilities: vec![PowerDataObject {
+                power_mw: 65_000,
+                ..Default::default()
+            }],
+            max_source_power_mw: 65_000,
+            ..Default::default()
+        };
+        let summaries = build_summaries(&[], &[p0], &[pd0, pd1], &[]);
+        let paired = summaries[0].power_delivery.as_ref().unwrap();
+        assert_eq!(paired.name, "pd1");
     }
 
     #[test]
