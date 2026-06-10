@@ -21,7 +21,7 @@ use serde::Serialize;
 
 use crate::cable::CableInfo;
 use crate::diagnostic::ChargingDiagnostic;
-use crate::pd::{decode_id_header, product_type_label};
+use crate::pd::{decode_id_header, decode_ufp_vdo_highest_speed, product_type_label, ProductType};
 use crate::power::PowerDeliveryPort;
 use crate::typec::{TypeCPort, TypeCPowerSupply};
 use crate::usb::{UsbDevice, UsbInterface};
@@ -808,6 +808,35 @@ impl DeviceSummary {
             }
         }
 
+        // Cable-vs-device data-speed cross-check: a Hub/Peripheral
+        // partner's UFP VDO1 advertises its highest USB speed; when the
+        // e-marked cable is rated below it, the cable caps the link.
+        // Capability property only — ChargingDiagnostic and
+        // CapabilityDegraded stay charging-only.
+        if let (Some(partner), Some(cable_speed)) =
+            (&port.partner, s.cable.as_ref().and_then(|c| c.speed))
+        {
+            let partner_speed = partner
+                .identity
+                .as_ref()
+                .filter(|id| {
+                    id.vdos.first().is_some_and(|&hdr| {
+                        matches!(
+                            decode_id_header(hdr).ufp_product_type,
+                            Some(ProductType::Hub | ProductType::Peripheral)
+                        )
+                    })
+                })
+                .and_then(|id| id.vdos.get(3))
+                .and_then(|&vdo1| decode_ufp_vdo_highest_speed(vdo1));
+            if partner_speed.is_some_and(|ps| cable_speed < ps) {
+                s.properties.push((
+                    "cable.data_speed_limit".into(),
+                    crate::pd::cable_speed_label(cable_speed).into(),
+                ));
+            }
+        }
+
         // Infer the active PDO from the live UCSI voltage. sysfs only
         // publishes which PDOs are *advertised*, not which one is
         // contracted — so without this pass `is_active` is always `false`
@@ -1590,6 +1619,80 @@ mod tests {
         };
         let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
         assert!(!s.power_delivery.as_ref().unwrap().source_capabilities[0].is_active);
+    }
+
+    fn peripheral_partner_with_ufp_vdo(vdo1: u32) -> crate::typec::TypeCPartner {
+        // ID Header: Peripheral UFP product type; vdos in spec order with
+        // vdos[3] = product_type_vdo1 (the UFP VDO1).
+        crate::typec::TypeCPartner {
+            identity: Some(crate::typec::TypeCIdentity {
+                vendor_id: 0x05AC,
+                product_id: 0,
+                vdos: vec![(2u32 << 27) | 0x05AC, 0, 0, vdo1],
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn cable_data_speed_limit_fires_when_cable_slower_than_partner() {
+        use crate::pd::CableSpeed;
+        // Gen 2 peripheral behind a USB 2.0-only e-marked cable.
+        let gen2_ufp_vdo = (0b011u32 << 29) | 2;
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(peripheral_partner_with_ufp_vdo(gen2_ufp_vdo)),
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            speed: Some(CableSpeed::Usb20),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable));
+        assert!(s
+            .properties
+            .iter()
+            .any(|(k, v)| k == "cable.data_speed_limit" && v == "USB 2.0"));
+    }
+
+    #[test]
+    fn cable_data_speed_limit_silent_when_cable_matches_partner() {
+        use crate::pd::CableSpeed;
+        let gen2_ufp_vdo = (0b011u32 << 29) | 2;
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(peripheral_partner_with_ufp_vdo(gen2_ufp_vdo)),
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            speed: Some(CableSpeed::Usb32Gen2),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable));
+        assert!(!s
+            .properties
+            .iter()
+            .any(|(k, _)| k == "cable.data_speed_limit"));
+    }
+
+    #[test]
+    fn cable_data_speed_limit_silent_for_pd20_partner() {
+        use crate::pd::CableSpeed;
+        // PD 2.0 identity: no UFP VDO — the reader pads vdos[3] with 0.
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(peripheral_partner_with_ufp_vdo(0)),
+            ..Default::default()
+        };
+        let cable = CableInfo {
+            speed: Some(CableSpeed::Usb20),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, None, Some(cable));
+        assert!(!s
+            .properties
+            .iter()
+            .any(|(k, _)| k == "cable.data_speed_limit"));
     }
 
     #[test]

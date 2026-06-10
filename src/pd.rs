@@ -51,7 +51,11 @@ pub enum ProductType {
 }
 
 /// USB data-rate capability advertised in a Cable VDO.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+///
+/// Invariant: variants are declared in ascending speed order — the
+/// derived `Ord` relies on it (`Usb20 < Usb32Gen1 < … < Usb4Gen4`), so
+/// callers can compare a cable's rating against a device's capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum CableSpeed {
     /// USB 2.0 (480 Mbps), or no SuperSpeed support advertised.
     Usb20,
@@ -200,6 +204,34 @@ pub fn decode_id_header(vdo: u32) -> IdHeaderVdo {
     }
 }
 
+/// Decode the *USB Highest Speed* field of a UFP VDO1.
+///
+/// `vdo1` is the fourth VDO of a Discover Identity response
+/// (`product_type_vdo1`) when the ID Header's `ufp_product_type` is
+/// [`ProductType::Hub`] or [`ProductType::Peripheral`] — callers gate on
+/// that; this function only decodes the bits.
+///
+/// Returns `None` when `vdo1` is zero or its UFP VDO version bits
+/// `[31:29]` are zero — PD 2.0 identities carry no UFP VDO, and the
+/// sysfs reader pads the missing slot with zero. Bits `[2:0]` map
+/// 0 → USB 2.0, 1 → Gen 1, 2 → Gen 2, 3 → USB4 Gen 3, 4 → USB4 Gen 4;
+/// other values are reserved → `None`.
+///
+/// See USB-PD R3.x § 6.4.4.3.1.4 (UFP VDO).
+pub fn decode_ufp_vdo_highest_speed(vdo1: u32) -> Option<CableSpeed> {
+    if vdo1 == 0 || (vdo1 >> 29) & 0x7 == 0 {
+        return None;
+    }
+    match vdo1 & 0x7 {
+        0 => Some(CableSpeed::Usb20),
+        1 => Some(CableSpeed::Usb32Gen1),
+        2 => Some(CableSpeed::Usb32Gen2),
+        3 => Some(CableSpeed::Usb4Gen3),
+        4 => Some(CableSpeed::Usb4Gen4),
+        _ => None,
+    }
+}
+
 /// `true` when the raw Cable VDO sets bits that USB-PD R3.x defines as
 /// reserved — a soft trust signal that the e-marker either is buggy or
 /// reuses a counterfeit reference design.
@@ -343,6 +375,45 @@ mod tests {
         assert!(v.vbus_through_cable);
         let v = decode_cable_vdo(0, false);
         assert!(!v.vbus_through_cable);
+    }
+
+    #[test]
+    fn ufp_vdo_highest_speed_decodes_known_values() {
+        // Version bits [31:29] non-zero (PD 3.x UFP VDO version 1.3).
+        let v = 0b011u32 << 29;
+        assert_eq!(decode_ufp_vdo_highest_speed(v), Some(CableSpeed::Usb20));
+        assert_eq!(
+            decode_ufp_vdo_highest_speed(v | 2),
+            Some(CableSpeed::Usb32Gen2)
+        );
+        assert_eq!(
+            decode_ufp_vdo_highest_speed(v | 4),
+            Some(CableSpeed::Usb4Gen4)
+        );
+    }
+
+    #[test]
+    fn ufp_vdo_highest_speed_rejects_zero_and_version_0() {
+        // Zero VDO — PD 2.0 identity padded by the sysfs reader.
+        assert_eq!(decode_ufp_vdo_highest_speed(0), None);
+        // Non-zero payload but version bits [31:29] zero — not a UFP VDO.
+        assert_eq!(decode_ufp_vdo_highest_speed(2), None);
+    }
+
+    #[test]
+    fn ufp_vdo_highest_speed_rejects_reserved_speed() {
+        let v = (0b011u32 << 29) | 7;
+        assert_eq!(decode_ufp_vdo_highest_speed(v), None);
+    }
+
+    #[test]
+    fn cable_speed_ord_follows_declaration_order() {
+        // The Ord derive backs the cable-vs-device comparison; lock the
+        // ascending declaration order.
+        assert!(CableSpeed::Usb20 < CableSpeed::Usb32Gen2);
+        assert!(CableSpeed::Usb32Gen2 < CableSpeed::Usb4Gen4);
+        assert!(CableSpeed::Usb32Gen1 < CableSpeed::Usb32Gen2);
+        assert!(CableSpeed::Usb4Gen3 < CableSpeed::Usb4Gen4);
     }
 
     #[test]

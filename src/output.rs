@@ -74,6 +74,14 @@ fn write_property<W: Write>(w: &mut W, key: &str, value: &str) -> io::Result<()>
         // Unexpected non-"true" value on a flag key — fall through to
         // the raw renderer so we don't silently swallow the data.
     }
+    // Value-bearing warning: a slow cable on a fast device is the app's
+    // headline use case — same yellow as the cable.trust.* flags.
+    if key == "cable.data_speed_limit" {
+        return writeln!(
+            w,
+            "  {DIM}• {RESET}{YELLOW}Cable limits data to {value}{RESET}"
+        );
+    }
     writeln!(w, "  {DIM}• {RESET}{}: {value}", property_label(key))
 }
 
@@ -636,6 +644,14 @@ mod tests {
 
         let out = render_property_string("cable_speed", "USB 3.2 Gen 2");
         assert!(out.contains("Cable speed: USB 3.2 Gen 2"), "{out}");
+    }
+
+    #[test]
+    fn data_speed_limit_renders_yellow_sentence() {
+        // Value-bearing warning — prose form, yellow like cable.trust.*.
+        let out = render_property_string("cable.data_speed_limit", "USB 2.0");
+        assert!(out.contains("Cable limits data to USB 2.0"), "{out}");
+        assert!(out.contains(YELLOW), "{out}");
     }
 
     #[test]

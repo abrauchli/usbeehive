@@ -67,6 +67,16 @@ requires `usbeehived` ≥ 0.10.0.
   detail now carries the same benign hint as `SinkLimit` ("often the
   device's own policy…") so a low contract doesn't read as a cable
   accusation.
+- **Cable data-speed cross-check.** When a Hub/Peripheral partner's UFP
+  VDO1 advertises a higher USB speed than the e-marked cable is rated
+  for, a new `properties` key `cable.data_speed_limit` carries the
+  cable's speed label (e.g. `"USB 2.0"`). The CLI renders it yellow as
+  "Cable limits data to USB 2.0" — a slow cable on a fast device is the
+  app's headline use case. New decoder `pd::decode_ufp_vdo_highest_speed`;
+  `CableSpeed` now derives `Ord` (variants are locked in ascending speed
+  order).
+
+### Fixed
 
 - **PDO values now parse on real kernels.** The kernel's typec pd class
   formats PDO attributes with unit suffixes (`5000mV`, `3000mA`, `45000mW`)
