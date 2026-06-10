@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use serde_json::{json, Map, Value};
 use usbeehive::pd::{cable_current_label, cable_speed_label};
-use usbeehive::summary::{Category, DeviceSummary};
+use usbeehive::summary::{Category, DeviceSummary, PowerSummary};
 use usbeehive::usb::{tree_roots, UsbDevice};
 use usbeehive::usbclass;
 use usbeehive::{DeviceManager, LinkSpeed};
@@ -130,14 +130,7 @@ fn print_text_iter<W: Write>(
         if !dev.primary_driver.is_empty() {
             writeln!(w, "  {DIM}• {RESET}Driver: {}", dev.primary_driver)?;
         }
-        if dev.power.power_in_mw > 0 {
-            let w_in = dev.power.power_in_mw / 1000;
-            writeln!(w, "  {DIM}• {RESET}Charging in: {w_in}W")?;
-        }
-        if dev.power.power_out_mw > 0 {
-            let w_out = dev.power.power_out_mw / 1000;
-            writeln!(w, "  {DIM}• {RESET}Sourcing out: {w_out}W")?;
-        }
+        write_power_lines(w, &dev.power)?;
         for (key, value) in &dev.properties {
             // `usb_max_power_ma` is shown in mA — the daemon emits the raw
             // descriptor value (bMaxPower), so don't multiply.
@@ -240,16 +233,34 @@ fn print_typec_summary<W: Write>(w: &mut W, dev: &DeviceSummary) -> io::Result<(
     if !dev.subtitle.is_empty() {
         writeln!(w, "  {}", dev.subtitle)?;
     }
-    if dev.power.power_in_mw > 0 {
-        let w_in = dev.power.power_in_mw / 1000;
-        writeln!(w, "  {DIM}• {RESET}Charging in: {w_in}W")?;
-    }
-    if dev.power.power_out_mw > 0 {
-        let w_out = dev.power.power_out_mw / 1000;
-        writeln!(w, "  {DIM}• {RESET}Sourcing out: {w_out}W")?;
-    }
+    write_power_lines(w, &dev.power)?;
     for (key, value) in &dev.properties {
         write_property(w, key, value)?;
+    }
+    Ok(())
+}
+
+/// Render the inbound/outbound power bullets. PD wattages are negotiated
+/// ceilings (UCSI reports the RDO operating point, never measured flow),
+/// so every figure carries "up to"; when the active contract allows more
+/// than the sink requests, the contract is shown alongside so a low
+/// number reads as sink policy rather than a bad cable.
+fn write_power_lines<W: Write>(w: &mut W, power: &PowerSummary) -> io::Result<()> {
+    if power.power_in_mw > 0 {
+        let w_in = power.power_in_mw / 1000;
+        let contract = power.contract_mw / 1000;
+        if contract > w_in {
+            writeln!(
+                w,
+                "  {DIM}• {RESET}Charging in: up to {w_in}W ({contract}W contract)"
+            )?;
+        } else {
+            writeln!(w, "  {DIM}• {RESET}Charging in: up to {w_in}W")?;
+        }
+    }
+    if power.power_out_mw > 0 {
+        let w_out = power.power_out_mw / 1000;
+        writeln!(w, "  {DIM}• {RESET}Sourcing out: up to {w_out}W")?;
     }
     Ok(())
 }
@@ -423,6 +434,7 @@ pub(crate) fn device_json(dev: &DeviceSummary, show_raw: bool) -> Value {
         json!({
             "powerInMW": dev.power.power_in_mw,
             "powerOutMW": dev.power.power_out_mw,
+            "contractMW": dev.power.contract_mw,
             "powerRole": format!("{:?}", dev.power.power_role),
         }),
     );

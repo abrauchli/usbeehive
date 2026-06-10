@@ -130,14 +130,25 @@ pub enum PowerRole {
 /// sourcing PD power right now". Both zero for non-PD-capable entries
 /// (plain USB devices, hubs). For plain USB device descriptor draw see
 /// the `usb_max_power_ma` entry in [`DeviceSummary::properties`].
+///
+/// All wattages here are *negotiated ceilings*, not measurements — UCSI
+/// publishes the PD contract's operating point, never a metered flow.
+/// Render them as "up to N W".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct PowerSummary {
-    /// Power flowing into the host from this port, in milliwatts. Zero
-    /// when not sinking, or for non-PD entries.
+    /// Power the sink requested from this port, in milliwatts. This is
+    /// the RDO operating power (a declared draw ceiling) when the UCSI
+    /// reading is available, falling back to the active / advertised PDO
+    /// power. Zero when not sinking, or for non-PD entries.
     pub power_in_mw: u32,
     /// Power flowing out of the host through this port, in milliwatts.
     /// Zero when not sourcing.
     pub power_out_mw: u32,
+    /// Maximum power of the *active PDO* — what the negotiated contract
+    /// allows, in milliwatts. Zero when no active contract could be
+    /// inferred. When `contract_mw > power_in_mw` the sink is asking for
+    /// less than the contract permits (sink-side limit, not cable/port).
+    pub contract_mw: u32,
     /// Current contract direction (or capability when no contract).
     pub power_role: PowerRole,
 }
@@ -147,6 +158,7 @@ impl Default for PowerSummary {
         PowerSummary {
             power_in_mw: 0,
             power_out_mw: 0,
+            contract_mw: 0,
             power_role: PowerRole::Unknown,
         }
     }
@@ -812,52 +824,62 @@ impl DeviceSummary {
             }
         }
 
-        // PD source advertisement → sinking power (we're being charged).
-        let mut sink_power_mw: u32 = 0;
-        let mut source_power_mw: u32 = 0;
-        if let Some(pd_port) = &s.power_delivery {
-            if !pd_port.source_capabilities.is_empty() {
-                let max_w = pd_port.max_source_power_mw / 1000;
-                s.properties
-                    .push(("charger_max".into(), format!("{max_w}W")));
-                s.status = Status::Charging;
-                // Active PDO ⇒ contracted power. Fall back to advertised max.
-                sink_power_mw = pd_port
-                    .source_capabilities
-                    .iter()
-                    .find(|p| p.is_active)
-                    .map(|p| p.power_mw)
-                    .unwrap_or(pd_port.max_source_power_mw);
-            }
-            s.charging_diag = ChargingDiagnostic::evaluate(pd_port, s.cable.as_ref());
-        }
-
-        // Live UCSI wattage (`voltage_now × current_now`) is the ground truth
-        // when present. Crucially it is published on the `ucsi-source-psy`
-        // power-supply, which is attached to the Type-C port directly — it does
-        // NOT require a `source-capabilities` directory or a linked
-        // `usb_power_delivery` node, and on many laptops the kernel exposes
-        // neither (the `pdN` device carries no `parent_port`, so it never pairs
-        // with a port). Reading it off `port.power_supply` rather than gating it
-        // behind `s.power_delivery` is what makes a live contract show up — e.g.
-        // a phone sourcing 5V @ 3A into the port, where the only evidence is the
-        // online PSY. That PSY reads non-zero only while the partner is actively
-        // sourcing (i.e. we are the sink), so attribute it by the power role.
-        let live_mw = port
+        // UCSI operating power (`voltage_now × current_now`). NOT a
+        // measurement — the kernel derives both values from the negotiated
+        // contract (selected PDO voltage × RDO operating current), so this
+        // is the draw ceiling the sink requested. Crucially it is published
+        // on the `ucsi-source-psy` power-supply, which is attached to the
+        // Type-C port directly — it does NOT require a `source-capabilities`
+        // directory or a linked `usb_power_delivery` node, and on many
+        // laptops the kernel exposes neither (the `pdN` device carries no
+        // `parent_port`, so it never pairs with a port). Reading it off
+        // `port.power_supply` rather than gating it behind `s.power_delivery`
+        // is what makes a live contract show up — e.g. a phone sourcing
+        // 5V @ 3A into the port, where the only evidence is the online PSY.
+        // That PSY reads non-zero only while the partner is actively sourcing
+        // (i.e. we are the sink), so attribute it by the power role.
+        let requested_mw = port
             .power_supply
             .as_ref()
             .and_then(|psy| psy.negotiated_power_mw())
             .filter(|&mw| mw > 0)
             .map(|mw| mw as u32);
 
+        // PD source advertisement → sinking power (we're being charged).
+        let mut sink_power_mw: u32 = 0;
+        let mut source_power_mw: u32 = 0;
+        let mut contract_mw: u32 = 0;
+        if let Some(pd_port) = &s.power_delivery {
+            if !pd_port.source_capabilities.is_empty() {
+                let max_w = pd_port.max_source_power_mw / 1000;
+                s.properties
+                    .push(("charger_max".into(), format!("{max_w}W")));
+                s.status = Status::Charging;
+                // Active PDO ⇒ what the contract allows. Fall back to the
+                // advertised max for the display figure only — contract_mw
+                // stays 0 unless a contract was actually inferred.
+                let active_pdo_mw = pd_port
+                    .source_capabilities
+                    .iter()
+                    .find(|p| p.is_active)
+                    .map(|p| p.power_mw);
+                contract_mw = active_pdo_mw.unwrap_or(0);
+                sink_power_mw = active_pdo_mw.unwrap_or(pd_port.max_source_power_mw);
+            }
+            s.charging_diag =
+                ChargingDiagnostic::evaluate(pd_port, s.cable.as_ref(), requested_mw.unwrap_or(0));
+        }
+
         if power_role_str.eq_ignore_ascii_case("source") && sink_power_mw == 0 {
-            // We're the source: power flows out. UCSI seldom measures the
+            // We're the source: power flows out. UCSI seldom reports the
             // outbound direction, so this is usually 0 and the role flag carries.
-            source_power_mw = live_mw.unwrap_or(0);
+            source_power_mw = requested_mw.unwrap_or(0);
             s.status = Status::Sourcing;
-        } else if let Some(mw) = live_mw {
-            // Sink with a live contract: inbound power. Overrides any advertised
-            // PDO estimate above with the measured value.
+        } else if let Some(mw) = requested_mw {
+            // Sink with a live contract: the requested operating power is the
+            // most specific inbound figure we have — it overrides the PDO
+            // estimate above (which is what the contract *allows*, kept
+            // separately in `contract_mw`).
             sink_power_mw = mw;
             s.status = Status::Charging;
         }
@@ -882,6 +904,7 @@ impl DeviceSummary {
         s.power = PowerSummary {
             power_in_mw: sink_power_mw,
             power_out_mw: source_power_mw,
+            contract_mw,
             power_role: role,
         };
 
@@ -1392,6 +1415,47 @@ mod tests {
         assert_eq!(s.power.power_role, PowerRole::Sink);
         assert_eq!(s.power.power_in_mw, 100_000);
         assert_eq!(s.power.power_out_mw, 0);
+    }
+
+    #[test]
+    fn sink_limited_laptop_reports_request_and_contract_separately() {
+        // The motivating real-world case: a 65W charger with a full
+        // 20V/3.25A contract, but the laptop only requests 0.75A in its
+        // RDO because the battery is charge-limited at 80%. UCSI reports
+        // the RDO operating point — so power_in must carry the 15W
+        // request, contract_mw the 65W the contract allows, and the
+        // diagnostic must blame the sink, not the cable.
+        use crate::power::{PdoType, PowerDataObject};
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            power_supply: Some(TypeCPowerSupply {
+                online: true,
+                voltage_now_uv: Some(20_000_000), // selected PDO voltage
+                current_now_ua: Some(750_000),    // RDO operating current
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![PowerDataObject {
+                r#type: PdoType::FixedSupply,
+                voltage_mv: 20_000,
+                current_ma: 3_250,
+                power_mw: 65_000,
+                index: 1,
+                ..Default::default()
+            }],
+            max_source_power_mw: 65_000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None);
+        assert_eq!(s.status, Status::Charging);
+        assert_eq!(s.power.power_in_mw, 15_000);
+        assert_eq!(s.power.contract_mw, 65_000);
+        let diag = s.charging_diag.as_ref().unwrap();
+        assert_eq!(diag.bottleneck, crate::diagnostic::Bottleneck::SinkLimit);
+        assert!(!diag.is_warning);
     }
 
     #[test]

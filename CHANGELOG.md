@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-06-10
+
+### Changed (breaking — D-Bus interface)
+
+**D-Bus interface bumped `org.usbeehive.Devices4` → `org.usbeehive.Devices5`,
+hard cut, no alias.** Continues the 0.9.0 honest-units theme, this time for
+the headline wattage itself. The kernel's UCSI driver derives `voltage_now`
+and `current_now` from the negotiated PD contract (selected PDO voltage ×
+RDO *operating current*) — they are never measured flow. A sink that is
+e.g. battery-charge-limited at 80% may hold a healthy 65W contract while
+requesting only 15W; presenting that 15W as "charging at 15W" reads as a
+bad cable. The wire now separates the two numbers:
+
+- **`power` tuple grows a field: `(uus)` → `(uuus)`** —
+  `(power_in_mw, power_out_mw, contract_mw, power_role)`. `power_in_mw`
+  keeps its position and fallback chain but is now documented as the
+  sink's *requested* operating power (render as "up to N W"); the new
+  `contract_mw` is what the active PDO contract *allows* (`0` = no
+  contract inferred). `contract_mw > power_in_mw` ⟹ the sink is limiting
+  its own draw. Positional unpackers must shift `power_role` from index 2
+  to index 3. `ListDevices` becomes
+  `a(ssssssssssqqsa(ss)ius(uuus)(bsssb)a(usuuuub)i)`.
+- **New `bottleneck` variant `SinkLimit`** (always `is_warning == false`,
+  so it never raises `CapabilityDegraded`): the contract is healthy but
+  the sink requests < 80% of it — typically a battery charge limit or
+  thermal policy. Distinguishes benign sink policy from the
+  cable/negotiation bottlenecks the app exists to catch. Covered by the
+  existing unknown-variant fallback rule for older clients.
+- `DeviceLimit` / `Fine` diagnostic prose reworded to stop claiming
+  measured flow: "Contract limited to NW" / "Charging at up to NW".
+
+The CLI follows suit: `Charging in: 15W` → `Charging in: up to 15W (65W
+contract)` when the contract allows more than the request, and `--json`
+gains `power.contractMW`. The [usbee](https://github.com/abrauchli/usbee)
+GNOME extension consumes the new wire as of its matching release and
+requires `usbeehived` ≥ 0.10.0.
+
+### Internal
+
+- `ChargingDiagnostic::evaluate` takes a third `requested_mw` argument
+  (the RDO operating power; pass `0` when unavailable).
+- `TypeCPowerSupply::negotiated_power_mw` and `PowerSummary` docs
+  rewritten to state the negotiated-ceiling (not measurement) semantics;
+  the misleading "live wattage is the ground truth" comment is gone.
+
 ## [0.9.0] - 2026-06-08
 
 ### Changed (breaking — D-Bus interface)

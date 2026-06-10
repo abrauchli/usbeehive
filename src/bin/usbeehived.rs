@@ -1,6 +1,6 @@
 //! `usbeehived` — D-Bus daemon exposing the usbeehive snapshot.
 //!
-//! Hosts `org.usbeehive.Devices4` on the session bus (see
+//! Hosts `org.usbeehive.Devices5` on the session bus (see
 //! [`usbeehive::dbus`]). A background thread runs the libudev hot-plug
 //! loop, refreshes the [`DeviceManager`] under a mutex, and emits
 //! `DeviceAdded` / `DeviceRemoved` / `CapabilityDegraded` /
@@ -12,7 +12,7 @@
 //! cargo run --no-default-features --features dbus --bin usbeehived
 //! gdbus call --session --dest org.usbeehive.Devices \
 //!     --object-path /org/usbeehive/Devices \
-//!     --method org.usbeehive.Devices4.ListDevices
+//!     --method org.usbeehive.Devices5.ListDevices
 //! ```
 //!
 //! ## systemd user service

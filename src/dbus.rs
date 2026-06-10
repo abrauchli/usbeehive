@@ -7,7 +7,7 @@
 //! Optional D-Bus interface for `usbeehive`.
 //!
 //! Compiled only when the `dbus` Cargo feature is enabled. Hosts the
-//! `org.usbeehive.Devices4` interface backing the `usbeehived` daemon, plus
+//! `org.usbeehive.Devices5` interface backing the `usbeehived` daemon, plus
 //! the wire types ([`DeviceEntry`], [`PowerEntry`], [`DiagnosticEntry`])
 //! clients receive.
 //!
@@ -20,12 +20,12 @@
 //!
 //! Bus name: `org.usbeehive.Devices`
 //! Object path: `/org/usbeehive/Devices`
-//! Interface: `org.usbeehive.Devices4`
+//! Interface: `org.usbeehive.Devices5`
 //!
 //! ## `ListDevices` element shape
 //!
 //! Per-entry signature:
-//! `a(ssssssssss qq s a(ss) i u s (uus) (bsssb) a(usuuuub) i)`.
+//! `a(ssssssssss qq s a(ss) i u s (uuus) (bsssb) a(usuuuub) i)`.
 //!
 //! | Pos | Field | Type | Notes |
 //! |---|---|---|---|
@@ -46,7 +46,7 @@
 //! | 15 | `port_number` | `i` | Type-C port number, `-1` otherwise. |
 //! | 16 | `link_speed_mbps` | `u` | Negotiated USB link speed in Mbps, `0` if unknown. |
 //! | 17 | `usb_version` | `s` | Canonical short form (`"2.0"`, `"3.2"`, `"4.0"`). Empty if unknown. |
-//! | 18 | `power` | `(uus)` | `(power_in_mw, power_out_mw, power_role)`. `power_in_mw > 0` ⟺ port is actively sinking PD power. |
+//! | 18 | `power` | `(uuus)` | `(power_in_mw, power_out_mw, contract_mw, power_role)`. `power_in_mw > 0` ⟺ port is actively sinking PD power. All wattages are negotiated ceilings ("up to"), never measured flow. `contract_mw` is what the active PDO allows (`0` = unknown); `contract_mw > power_in_mw` ⟹ the sink is requesting less than the contract permits. |
 //! | 19 | `charging_diag` | `(bsssb)` | `(present, bottleneck, summary, detail, is_warning)`. `present == false` on every non-`Charging` entry. |
 //! | 20 | `pdo_list` | `a(usuuuub)` | `(index, kind, voltage_mv, max_voltage_mv, current_ma, power_mw, is_active)` per source PDO. Empty for entries without a companion `PowerDeliveryPort`. |
 //! | 21 | `active_pdo_index` | `i` | Index into `pdo_list` of the active contract, or `-1`. |
@@ -55,7 +55,7 @@
 //!
 //! | Member | Signature | Notes |
 //! |---|---|---|
-//! | `ListDevices` | `() → a(ssssssssssqqsa(ss)ius(uus)(bsssb)a(usuuuub)i)` | One [`DeviceEntry`] per summary. |
+//! | `ListDevices` | `() → a(ssssssssssqqsa(ss)ius(uuus)(bsssb)a(usuuuub)i)` | One [`DeviceEntry`] per summary. |
 //! | `ListPorts` | `() → ai` | Type-C `port_number`s currently exposed. |
 //! | `Diagnose` | `(i) → (bsssb)` | Same shape as the per-entry `charging_diag`. `present == false` when no diagnostic is available for the port. |
 //! | `SnapshotJson` | `() → s` | Full structured snapshot serialised with `serde_json`. |
@@ -67,22 +67,30 @@
 //! | `CapabilityDegraded` (signal) | `(iss)` | `(port_number, summary, detail)` when a port's charging diagnostic newly raises `is_warning`. |
 //! | `CapabilityRestored` (signal) | `i` | `port_number` whose previous warning has cleared. |
 //!
-//! # Migrating from `Devices3`
+//! # Migrating from `Devices4`
 //!
-//! Hard cut — `Devices3` is gone, no alias. The per-entry signature and
-//! every method/signal are unchanged; the break is confined to two
-//! `properties` machine-key renames that fix misleading names. Both keys
-//! carry a *declared maximum*, not a live reading, and were being read as
-//! live current — the new names say so. Clients must:
+//! Hard cut — `Devices4` is gone, no alias. The break is one structural
+//! change plus one enum addition, both continuing the 0.9.0 theme of not
+//! presenting negotiated PD values as live measurements:
 //!
-//! 1. Update the proxy/`Connect` call to use `org.usbeehive.Devices4`.
-//! 2. `usb_power_ma` → `usb_max_power_ma` — the USB `bMaxPower` descriptor
-//!    draw ceiling (raw mA, 5 V assumed), not the instantaneous draw.
-//! 3. `cable_current` → `cable_max_current` — the cable e-marker current
-//!    *rating*, now parallel to its sibling `cable_max_power`.
+//! 1. Update the proxy/`Connect` call to use `org.usbeehive.Devices5`.
+//! 2. The per-entry `power` tuple grows a field: `(uus)` → `(uuus)`,
+//!    `(power_in_mw, power_out_mw, contract_mw, power_role)`. The new
+//!    `contract_mw` is the active PDO's maximum power — what the
+//!    negotiated contract *allows* — while `power_in_mw` remains the
+//!    sink's *requested* operating power (UCSI publishes the RDO
+//!    operating point, not a metered flow; a battery-charge-limited
+//!    laptop may request 15 W of a 65 W contract). `0` = no contract
+//!    inferred. Positional unpackers must shift: `power_role` moves from
+//!    index 2 to index 3.
+//! 3. New `bottleneck` variant `"SinkLimit"`: contract healthy, but the
+//!    sink requests < 80% of it — benign sink-side policy (battery charge
+//!    limit, thermal), always `is_warning == false`. Covered by the
+//!    pre-existing unknown-variant fallback rule below.
 //!
-//! There is no value or signature change beyond the key strings; a client
-//! that still queries the old keys simply stops finding those two rows.
+//! `ListDevices` signature changes accordingly to
+//! `a(ssssssssssqqsa(ss)ius(uuus)(bsssb)a(usuuuub)i)`; every other
+//! method, property, and signal is unchanged.
 //!
 //! ## Enum extensibility convention
 //!
@@ -110,10 +118,16 @@ use crate::sysfs::manager::{DeviceManager, Snapshot, SnapshotDiff};
 /// dbus-monitor friendliness.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
 pub struct PowerEntry {
-    /// Inbound power (we are sinking) in milliwatts. Zero when not sinking.
+    /// Inbound power the sink *requested* (RDO operating power — a
+    /// negotiated ceiling, not a measured flow), in milliwatts. Zero when
+    /// not sinking. Render as "up to N W".
     pub power_in_mw: u32,
     /// Outbound power (we are sourcing) in milliwatts. Zero when not sourcing.
     pub power_out_mw: u32,
+    /// What the active PDO contract *allows*, in milliwatts. Zero when no
+    /// contract was inferred. `contract_mw > power_in_mw` means the sink
+    /// is asking for less than the contract permits (sink-side limit).
+    pub contract_mw: u32,
     /// `Source` | `Sink` | `DualRole` | `Unknown`.
     pub power_role: String,
 }
@@ -123,6 +137,7 @@ impl From<&PowerSummary> for PowerEntry {
         PowerEntry {
             power_in_mw: p.power_in_mw,
             power_out_mw: p.power_out_mw,
+            contract_mw: p.contract_mw,
             power_role: format!("{:?}", p.power_role),
         }
     }
@@ -176,7 +191,7 @@ pub struct DiagnosticEntry {
     /// `true` when a diagnostic was computed.
     pub present: bool,
     /// Bottleneck variant name (`"NoCharger"`, `"ChargerLimit"`,
-    /// `"CableLimit"`, `"DeviceLimit"`, `"Fine"`).
+    /// `"CableLimit"`, `"DeviceLimit"`, `"SinkLimit"`, `"Fine"`).
     pub bottleneck: String,
     /// One-line headline.
     pub summary: String,
@@ -204,7 +219,7 @@ impl From<Option<&ChargingDiagnostic>> for DiagnosticEntry {
 /// One device or Type-C port as published over D-Bus.
 ///
 /// Serialisable mirror of [`DeviceSummary`]. See the module docs for the
-/// per-field semantics and the migration guide from `Devices1`.
+/// per-field semantics and the migration guide from `Devices4`.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct DeviceEntry {
     /// Stable identifier.
@@ -333,7 +348,7 @@ impl State {
     }
 }
 
-/// `org.usbeehive.Devices4` interface implementation.
+/// `org.usbeehive.Devices5` interface implementation.
 pub struct DevicesIface {
     /// Shared state backing every method call.
     pub state: Arc<Mutex<State>>,
@@ -365,7 +380,7 @@ impl DevicesIface {
     }
 }
 
-#[interface(name = "org.usbeehive.Devices4")]
+#[interface(name = "org.usbeehive.Devices5")]
 impl DevicesIface {
     /// Return one [`DeviceEntry`] per summary in the latest snapshot.
     fn list_devices(&self) -> Vec<DeviceEntry> {
@@ -477,12 +492,14 @@ mod tests {
     #[test]
     fn power_entry_serializes_enum_as_string() {
         let p = PowerSummary {
-            power_in_mw: 60_000,
+            power_in_mw: 15_000,
             power_out_mw: 0,
+            contract_mw: 65_000,
             power_role: PowerRole::Sink,
         };
         let e = PowerEntry::from(&p);
-        assert_eq!(e.power_in_mw, 60_000);
+        assert_eq!(e.power_in_mw, 15_000);
+        assert_eq!(e.contract_mw, 65_000);
         assert_eq!(e.power_role, "Sink");
     }
 

@@ -68,7 +68,7 @@ mod dbus_tests {
 
     #[test]
     fn list_devices_carries_full_structured_fields() {
-        // Exercises every top-level structured field on the Devices4 wire
+        // Exercises every top-level structured field on the Devices5 wire
         // against the cable-limit fixture (60W cable + 100W charger).
         let root = TempRoot::new("dbus-structured");
         write_port_with_cable_limit(root.path());
@@ -87,10 +87,13 @@ mod dbus_tests {
         assert_eq!(port.status, "Charging"); // PD source advertised
         assert_eq!(port.port_number, 0);
 
-        // Power flow — sinking 100W from the charger.
+        // Power flow — sinking up to 100W from the charger. No UCSI psy in
+        // this fixture, so no active contract is inferred: power_in falls
+        // back to the advertised max and contract_mw stays 0.
         assert_eq!(port.power.power_role, "Sink");
         assert_eq!(port.power.power_in_mw, 100_000);
         assert_eq!(port.power.power_out_mw, 0);
+        assert_eq!(port.power.contract_mw, 0);
 
         // Charging diagnostic carried on the entry — no separate Diagnose()
         // round-trip needed.
@@ -365,6 +368,12 @@ mod dbus_tests {
         assert!(!port.pdo_list[0].is_active);
         assert!(!port.pdo_list[1].is_active);
         assert_eq!(port.pdo_list[2].voltage_mv, 20_000);
+
+        // Devices5 contract/request split: power_in carries the RDO
+        // operating power (20V × 4.5A = 90W requested), contract_mw the
+        // active PDO's allowance (100W).
+        assert_eq!(port.power.power_in_mw, 90_000);
+        assert_eq!(port.power.contract_mw, 100_000);
     }
 
     #[test]

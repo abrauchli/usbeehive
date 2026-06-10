@@ -94,13 +94,22 @@ pub struct TypeCPowerSupply {
 }
 
 impl TypeCPowerSupply {
-    /// Live negotiated wattage in **mW**, computed as
+    /// Negotiated operating power in **mW**, computed as
     /// `voltage_now × current_now`. Uses `i128` internally so EPR
     /// voltages (up to 48V) don't overflow when multiplied by current.
     ///
+    /// This is **not a measurement**. The kernel's UCSI driver derives
+    /// both attributes from the negotiated PD contract: `voltage_now` is
+    /// the selected PDO's voltage and `current_now` is the *operating
+    /// current* the sink requested in its RDO (see
+    /// `drivers/usb/typec/ucsi/psy.c`). The product is therefore the
+    /// draw ceiling the sink asked for — actual flow can be anything up
+    /// to it, and a sink that is e.g. battery-charge-limited may request
+    /// far less than the contract allows.
+    ///
     /// Returns `None` when either reading is missing or non-positive —
-    /// callers should treat that as "no live wattage available right now",
-    /// not as an error.
+    /// callers should treat that as "no negotiated wattage available
+    /// right now", not as an error.
     pub fn negotiated_power_mw(&self) -> Option<i64> {
         let v = self.voltage_now_uv?;
         let i = self.current_now_ua?;

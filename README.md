@@ -114,7 +114,7 @@ consumers pull in only what they need.
 | `sysfs` | yes | `Sysfs` handle + `DeviceManager` — Linux `/sys` enumeration with injectable root. |
 | `watch` | yes | libudev hotplug monitor: `watch::Watcher` + `watch::run_loop`. |
 | `cli` | yes | The `usbeehive` binary (clap + JSON / text rendering). |
-| `dbus` | no | `usbeehive::dbus` interface module + the `usbeehived` daemon binary publishing `org.usbeehive.Devices4` on the session bus (implies `watch`). |
+| `dbus` | no | `usbeehive::dbus` interface module + the `usbeehived` daemon binary publishing `org.usbeehive.Devices5` on the session bus (implies `watch`). |
 
 Library-only consumers can drop the binary deps:
 
@@ -185,14 +185,14 @@ cargo build --release --no-default-features --features dbus
 Building the `dbus` feature requires a C compiler (`cc`) and the `libudev`
 development headers — on Ubuntu / Debian: `sudo apt install gcc libudev-dev`.
 
-Wire surface — `org.usbeehive.Devices4` at `/org/usbeehive/Devices`:
+Wire surface — `org.usbeehive.Devices5` at `/org/usbeehive/Devices`:
 
 Each `ListDevices` entry is a 21-field tuple:
 `(id, category, device_class, device_subclass, status, headline, subtitle, icon, vendor, product, vendor_id, product_id, primary_driver, properties, port_number, link_speed_mbps, usb_version, power, charging_diag, pdo_list, active_pdo_index)`. See [`src/dbus.rs`](src/dbus.rs) module docs for per-field semantics.
 
 | Member | Kind | Notes |
 |---|---|---|
-| `ListDevices` | method `() → a(ssssssssssqqsa(ss)ius(uus)(bsssb)a(usuuuub)i)` | One structured entry per summary. Properties are `(machine_key, value)` pairs; `pdo_list` is the structured source-PDO advertisement. |
+| `ListDevices` | method `() → a(ssssssssssqqsa(ss)ius(uuus)(bsssb)a(usuuuub)i)` | One structured entry per summary. Properties are `(machine_key, value)` pairs; `pdo_list` is the structured source-PDO advertisement. |
 | `ListPorts` | method `() → ai` | Type-C `port_number`s currently exposed. |
 | `Diagnose` | method `(i) → (bsssb)` | Charging diagnostic for a port — same shape as the per-entry `charging_diag`. `present == false` when none available. |
 | `SnapshotJson` | method `() → s` | Full structured snapshot — same shape as `usbeehive --json`. |
@@ -206,23 +206,33 @@ Quick poke from the shell:
 ```sh
 gdbus call --session --dest org.usbeehive.Devices \
     --object-path /org/usbeehive/Devices \
-    --method org.usbeehive.Devices4.ListDevices
+    --method org.usbeehive.Devices5.ListDevices
 ```
 
 A minimal Rust client lives in [`examples/dbus_client.rs`](examples/dbus_client.rs).
 
-### Devices4 migration
+### Devices5 migration
 
-`Devices3` was retired in favor of `Devices4` — a narrow break that only
-renames two `properties` machine-keys to stop them reading as live
-measurements (both are declared maxima, not instantaneous draw):
+`Devices4` was retired in favor of `Devices5`, continuing the honest-units
+theme: USB-PD wattages on the wire are *negotiated ceilings*, never
+measured flow — UCSI reports the contract's operating point, and a sink
+that is e.g. battery-charge-limited may request far less than its
+contract allows. The break:
 
-- `usb_power_ma` → `usb_max_power_ma` (USB `bMaxPower` descriptor ceiling)
-- `cable_current` → `cable_max_current` (cable e-marker current rating,
-  now parallel to `cable_max_power`)
+- The per-entry `power` tuple grows a field: `(uus)` → `(uuus)`, now
+  `(power_in_mw, power_out_mw, contract_mw, power_role)`. `power_in_mw`
+  remains the sink's *requested* operating power ("up to N W"); the new
+  `contract_mw` is what the active PDO contract *allows* (`0` = no
+  contract inferred). `contract_mw > power_in_mw` means the sink is
+  limiting its own draw, not the cable or charger.
+- New `bottleneck` variant `SinkLimit` (always `is_warning == false`):
+  contract healthy, sink requesting < 80% of it — typically a battery
+  charge limit or thermal policy. Falls under the existing
+  unknown-variant rule for older clients.
 
-Update the interface name and the two key strings; the per-entry
-signature and every method/signal are otherwise unchanged. Adding new
+Update the interface name and any positional unpacking of the `power`
+tuple (`power_role` moves from index 2 to 3); every method/signal is
+otherwise unchanged. Adding new
 enum variants (`device_class`, `status`, `power_role`, `bottleneck`) is
 non-breaking; clients MUST treat any unrecognized string as `Unknown` /
 fall back to category-based behavior. Machine-keyed flag properties
