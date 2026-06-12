@@ -58,7 +58,7 @@ usbeehive/
 | `sysfs` | yes | `std::fs` | `/sys` enumeration, `Sysfs`, `DeviceManager` |
 | `watch` | yes | `udev`, `libc` | libudev hotplug (`Watcher`, `run_loop`) — implies `sysfs` |
 | `cli` | yes | `clap`, `serde_json` | `usbeehive` binary — implies `sysfs` |
-| `dbus` | no | `zbus`, `serde_json` | `usbeehive::dbus` module + `usbeehived` daemon publishing `org.usbeehive.Devices4` — implies `watch` |
+| `dbus` | no | `zbus`, `serde_json` | `usbeehive::dbus` module + `usbeehived` daemon publishing `org.usbeehive.Devices5` — implies `watch` |
 
 `watch` and `cli` both transitively enable `sysfs`; `dbus` enables `watch`
 (and therefore `sysfs`). Pure-decoder consumers go
@@ -126,7 +126,7 @@ Manual smoke tests:
 | `src/sysfs/reader.rs` | `Sysfs` handle + `read_attr` / `read_int` / `read_hex` |
 | `src/sysfs/manager.rs` | `DeviceManager` + `Snapshot` |
 | `src/watch.rs` | `Watcher` + `run_loop` |
-| `src/dbus.rs` | `org.usbeehive.Devices4` interface + `DeviceEntry` / `PdoEntry` / `DiagnosticEntry` wire types |
+| `src/dbus.rs` | `org.usbeehive.Devices5` interface + `DeviceEntry` / `PdoEntry` / `DiagnosticEntry` wire types |
 | `src/bin/usbeehived.rs` | D-Bus daemon entrypoint (zbus + hot-plug thread) |
 | `src/output.rs` | CLI text + JSON rendering |
 | `src/main.rs` | CLI parser + dispatch |
