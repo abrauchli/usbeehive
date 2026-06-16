@@ -131,3 +131,36 @@ Manual smoke tests:
 | `src/output.rs` | CLI text + JSON rendering |
 | `src/main.rs` | CLI parser + dispatch |
 | `tests/fixture_builder.rs` | Programmatic sysfs-tree builder |
+
+## Release
+
+Published to crates.io (`usbeehive`) and tagged on GitHub. `version` in
+`Cargo.toml` follows SemVer; tags are `vX.Y.Z`.
+
+**Pre-release gate — ALWAYS run and pass these before committing the version
+bump.** The CI `lint` job runs the first two and will fail the push otherwise
+(`cargo publish` itself does *not* check formatting, so a release can ship
+green while master CI goes red — exactly what happened with v0.11.0):
+
+```bash
+cargo fmt --all --check                            # rustfmt gate (CI: lint)
+cargo clippy --all-targets -- -D warnings          # clippy gate (CI: lint, default features)
+cargo clippy --all-targets --all-features -- -D warnings  # also lint the dbus/daemon code (CI's default-feature clippy skips it)
+cargo test                                         # full suite
+cargo test --no-default-features --features dbus   # daemon + DeviceChanged signal paths
+```
+
+If `cargo fmt --all --check` reports a diff, run `cargo fmt --all` and
+re-stage before committing.
+
+Then:
+
+1. Bump `version` in `Cargo.toml`; refresh `Cargo.lock` (`cargo check`).
+2. Move the `## [Unreleased]` CHANGELOG section to `## [X.Y.Z] - YYYY-MM-DD`
+   and update the reference links at the bottom.
+3. Commit `Release X.Y.Z — <summary>`.
+4. Annotated tag: `git tag -a vX.Y.Z`.
+5. `cargo publish` — run `cargo publish --dry-run` first; publishing is
+   irreversible (you can only yank, never replace a version).
+6. `git push origin master && git push origin vX.Y.Z` (the tag triggers
+   `.github/workflows/release.yml`).
