@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **New `DeviceChanged(id: String)` D-Bus signal on `org.usbeehive.Devices5`.**
+  Emitted when a device or Type-C port that remains present in the snapshot
+  transitions to a different user-visible state: connection status (e.g.
+  `Charging` → `Connected` after AC unplug), power/data role, transport flags
+  (`transport.usb2`, `transport.usb3`, `transport.usb4`, `transport.dp_altmode`,
+  `transport.tb`), link speed, USB version, active PDO index, or primary driver.
+
+  The change is detected via a **curated state fingerprint** that deliberately
+  excludes raw power magnitudes (`power_in_mw`, `power_out_mw`, `contract_mw`)
+  and raw-magnitude properties (`pd_contract`, `charger_max`,
+  `usb_max_power_ma`). This means the daemon's ~500 ms poll jitter does not
+  generate spurious wakeups for consumers watching the signal.
+
+  This is an **additive change** — the signal is new but the interface name
+  stays `org.usbeehive.Devices5` with no wire-format bump. Existing consumers
+  that do not subscribe to `DeviceChanged` are unaffected; unknown signals are
+  silently ignored by D-Bus clients. `MIN_USBEEHIVE_VERSION` is not changed.
+
+  **Motivation:** pure-snapshot D-Bus consumers (e.g. the
+  [usbee](https://github.com/abrauchli/usbee) GNOME Quick Settings indicator)
+  had no way to know when a present port changed state — plugging in a charger
+  and then unplugging it left the tile stuck on "Charging NW" until the next
+  manual re-open. Subscribing to `DeviceChanged` and calling `ListDevices`
+  again fixes the stale tile without polling.
+
 ## [0.10.0] - 2026-06-10
 
 ### Changed (breaking — D-Bus interface)
@@ -636,6 +665,8 @@ For library consumers:
 - Cast signal handler through `*const ()` for clippy fn-to-int lint.
 - Re-enable `watch` feature by default.
 
+[Unreleased]: https://github.com/abrauchli/usbeehive/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/abrauchli/usbeehive/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/abrauchli/usbeehive/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/abrauchli/usbeehive/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/abrauchli/usbeehive/compare/v0.6.0...v0.7.0
