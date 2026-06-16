@@ -708,4 +708,104 @@ mod tests {
             "charger must not get usb_device property"
         );
     }
+
+    #[test]
+    fn snapshot_diff_flags_status_only_transition_as_changed() {
+        // Port present in both snapshots; only Status changes (Charging -> Connected).
+        // Expect diff.changed contains the port's id; added/removed/degraded/resolved empty.
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner {
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut prev_summaries = build_summaries(&[], std::slice::from_ref(&port), &[], &[]);
+        prev_summaries[0].status = crate::summary::Status::Charging;
+        let prev = Snapshot {
+            summaries: prev_summaries,
+            ..Default::default()
+        };
+
+        let mut cur_summaries = build_summaries(&[], std::slice::from_ref(&port), &[], &[]);
+        cur_summaries[0].status = crate::summary::Status::Connected;
+        let cur = Snapshot {
+            summaries: cur_summaries,
+            ..Default::default()
+        };
+
+        let diff = cur.diff(&prev);
+        let expected_id = cur.summaries[0].id();
+        assert_eq!(diff.changed, vec![expected_id], "status transition must be in changed");
+        assert!(diff.added.is_empty(), "added must be empty");
+        assert!(diff.removed.is_empty(), "removed must be empty");
+        assert!(diff.newly_degraded.is_empty(), "newly_degraded must be empty");
+        assert!(diff.resolved.is_empty(), "resolved must be empty");
+        assert!(!diff.is_empty(), "diff must not be empty when changed is non-empty");
+    }
+
+    #[test]
+    fn snapshot_diff_ignores_raw_power_jitter() {
+        // Port present in both; only raw power magnitudes differ (power_in_mw, contract_mw,
+        // pd_contract property). Curated fingerprint is unchanged -> changed must be empty.
+        let port = TypeCPort {
+            port_number: 0,
+            partner: Some(TypeCPartner::default()),
+            ..Default::default()
+        };
+        let prev_summaries = build_summaries(&[], std::slice::from_ref(&port), &[], &[]);
+        let prev = Snapshot {
+            summaries: prev_summaries,
+            ..Default::default()
+        };
+
+        let mut cur_summaries = build_summaries(&[], std::slice::from_ref(&port), &[], &[]);
+        cur_summaries[0].power.power_in_mw = 15_000;
+        cur_summaries[0].power.contract_mw = 65_000;
+        cur_summaries[0]
+            .properties
+            .push(("pd_contract".into(), "5.0V @ 3.00A".into()));
+        let cur = Snapshot {
+            summaries: cur_summaries,
+            ..Default::default()
+        };
+
+        let diff = cur.diff(&prev);
+        assert!(
+            diff.changed.is_empty(),
+            "raw power jitter must not populate changed; got {:?}",
+            diff.changed
+        );
+    }
+
+    #[test]
+    fn snapshot_diff_flags_link_speed_change_as_changed() {
+        // Same USB device id in both snapshots; link_speed_mbps changes 5000 -> 10000.
+        let usb = crate::usb::UsbDevice {
+            bus_port: "1-1".into(),
+            product: "thing".into(),
+            speed: 5000,
+            ..Default::default()
+        };
+        let prev_summaries = build_summaries(std::slice::from_ref(&usb), &[], &[], &[]);
+        let prev = Snapshot {
+            summaries: prev_summaries,
+            ..Default::default()
+        };
+
+        let mut cur_summaries = build_summaries(std::slice::from_ref(&usb), &[], &[], &[]);
+        cur_summaries[0].link_speed_mbps = 10_000;
+        let cur = Snapshot {
+            summaries: cur_summaries,
+            ..Default::default()
+        };
+
+        let diff = cur.diff(&prev);
+        let expected_id = cur.summaries[0].id();
+        assert!(
+            diff.changed.contains(&expected_id),
+            "link_speed change must be in changed; got {:?}",
+            diff.changed
+        );
+    }
 }
