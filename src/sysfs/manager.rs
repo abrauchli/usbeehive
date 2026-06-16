@@ -43,6 +43,11 @@ pub struct SnapshotDiff {
     /// Type-C port numbers whose previously-warning diagnostic has cleared
     /// (e.g. user swapped the cable for a properly-rated one).
     pub resolved: Vec<i32>,
+    /// Summary ids present in BOTH snapshots whose curated user-visible
+    /// state changed (status, power/data role, transport flags, link speed,
+    /// USB version, active PDO index, primary driver) — excludes raw power
+    /// magnitudes so 500ms mW/mV jitter does not wake consumers.
+    pub changed: Vec<String>,
 }
 
 impl SnapshotDiff {
@@ -52,6 +57,7 @@ impl SnapshotDiff {
             && self.removed.is_empty()
             && self.newly_degraded.is_empty()
             && self.resolved.is_empty()
+            && self.changed.is_empty()
     }
 }
 
@@ -104,13 +110,82 @@ impl Snapshot {
             }
         }
 
+        // Compute `changed`: ids present in BOTH snapshots whose curated
+        // state fingerprint differs. Excludes ids in `added` (new arrivals).
+        let prev_fingerprints: std::collections::HashMap<String, String> = previous
+            .summaries
+            .iter()
+            .map(|s| (s.id(), state_fingerprint(s)))
+            .collect();
+
+        let changed: Vec<String> = self
+            .summaries
+            .iter()
+            .filter(|s| {
+                let id = s.id();
+                // Must be in both snapshots (not a new arrival).
+                prev_ids.contains(&id) && !added.contains(&id)
+            })
+            .filter_map(|s| {
+                let id = s.id();
+                let prev_fp = prev_fingerprints.get(&id)?;
+                if state_fingerprint(s) != *prev_fp {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         SnapshotDiff {
             added,
             removed,
             newly_degraded,
             resolved,
+            changed,
         }
     }
+}
+
+/// Build a deterministic state fingerprint for [`DeviceSummary`] that covers
+/// only the curated user-visible fields. Raw power magnitudes (`power_in_mw`,
+/// `power_out_mw`, `contract_mw`) and raw-magnitude properties (`pd_contract`,
+/// `charger_max`, `usb_max_power_ma`, …) are deliberately excluded so that
+/// the daemon's ~500ms poll jitter does not wake consumers.
+fn state_fingerprint(s: &crate::summary::DeviceSummary) -> String {
+    // Active PDO index: position of the active entry in source_capabilities.
+    let active_pdo: i32 = s
+        .power_delivery
+        .as_ref()
+        .and_then(|pd| pd.source_capabilities.iter().position(|p| p.is_active))
+        .map(|i| i as i32)
+        .unwrap_or(-1);
+
+    // Curated subset of properties: data_role + transport.* keys, sorted for
+    // determinism (source-order churn must not flip the fingerprint).
+    let mut curated_props: Vec<(&str, &str)> = s
+        .properties
+        .iter()
+        .filter(|(k, _)| k == "data_role" || k.starts_with("transport."))
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    curated_props.sort_by_key(|(k, _)| *k);
+    let props_str = curated_props
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "{:?}|{:?}|{}|{}|{}|{}|{}",
+        s.status,
+        s.power.power_role,
+        s.link_speed_mbps,
+        s.usb_version,
+        s.primary_driver,
+        active_pdo,
+        props_str,
+    )
 }
 
 /// Stateful enumerator that keeps the latest [`Snapshot`] in memory.
