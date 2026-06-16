@@ -64,6 +64,7 @@
 //! | `DeviceCount` (property) | `u` | Number of summaries in the latest snapshot. |
 //! | `DeviceAdded` (signal) | `(ss)` | `(id, headline)` for a newly attached device. |
 //! | `DeviceRemoved` (signal) | `s` | `id` of a device that disappeared. |
+//! | `DeviceChanged` (signal) | `s` | `id` of a present device/port whose curated user-visible state changed. Additive (0.10.x); does not bump the interface. |
 //! | `CapabilityDegraded` (signal) | `(iss)` | `(port_number, summary, detail)` when a port's charging diagnostic newly raises `is_warning`. |
 //! | `CapabilityRestored` (signal) | `i` | `port_number` whose previous warning has cleared. |
 //!
@@ -449,6 +450,13 @@ impl DevicesIface {
     /// Emitted when a previously-visible device or port disappears.
     #[zbus(signal)]
     pub async fn device_removed(emitter: &SignalEmitter<'_>, id: String) -> zbus::Result<()>;
+
+    /// Emitted when a device/port that remains present changes user-visible
+    /// state (status, role, transport, link speed, active PDO, driver).
+    /// Additive — existing consumers ignore it; new consumers re-snapshot.
+    /// Excludes raw power-magnitude jitter.
+    #[zbus(signal)]
+    pub async fn device_changed(emitter: &SignalEmitter<'_>, id: String) -> zbus::Result<()>;
 
     /// Emitted when a port's charging diagnostic newly raises `is_warning`.
     /// Payload duplicates `entry.charging_diag.{summary,detail}` so the

@@ -3,8 +3,9 @@
 //! Hosts `org.usbeehive.Devices5` on the session bus (see
 //! [`usbeehive::dbus`]). A background thread runs the libudev hot-plug
 //! loop, refreshes the [`DeviceManager`] under a mutex, and emits
-//! `DeviceAdded` / `DeviceRemoved` / `CapabilityDegraded` /
-//! `CapabilityRestored` signals as the snapshot changes.
+//! `DeviceAdded` / `DeviceRemoved` / `DeviceChanged` /
+//! `CapabilityDegraded` / `CapabilityRestored` signals as the snapshot
+//! changes.
 //!
 //! Run with `RUST_LOG=info` for connect/disconnect tracing on stderr.
 //!
@@ -190,6 +191,13 @@ fn emit_signals(
         eprintln!("usbeehived: - {id}");
         if let Err(e) = block_on(DevicesIface::device_removed(emitter, id.clone())) {
             eprintln!("usbeehived: device_removed emit failed: {e}");
+        }
+    }
+
+    for id in &diff.changed {
+        eprintln!("usbeehived: ~ {id} changed");
+        if let Err(e) = block_on(DevicesIface::device_changed(emitter, id.clone())) {
+            eprintln!("usbeehived: device_changed emit failed: {e}");
         }
     }
 
