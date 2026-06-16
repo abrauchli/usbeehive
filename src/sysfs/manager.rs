@@ -811,12 +811,22 @@ mod tests {
 
         let diff = cur.diff(&prev);
         let expected_id = cur.summaries[0].id();
-        assert_eq!(diff.changed, vec![expected_id], "status transition must be in changed");
+        assert_eq!(
+            diff.changed,
+            vec![expected_id],
+            "status transition must be in changed"
+        );
         assert!(diff.added.is_empty(), "added must be empty");
         assert!(diff.removed.is_empty(), "removed must be empty");
-        assert!(diff.newly_degraded.is_empty(), "newly_degraded must be empty");
+        assert!(
+            diff.newly_degraded.is_empty(),
+            "newly_degraded must be empty"
+        );
         assert!(diff.resolved.is_empty(), "resolved must be empty");
-        assert!(!diff.is_empty(), "diff must not be empty when changed is non-empty");
+        assert!(
+            !diff.is_empty(),
+            "diff must not be empty when changed is non-empty"
+        );
     }
 
     #[test]
