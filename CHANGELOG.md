@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-05
+
 ### Added
 
 - **USB BOS (Binary Object Store) decoding — capability vs negotiated data
@@ -807,7 +809,8 @@ For library consumers:
 - Cast signal handler through `*const ()` for clippy fn-to-int lint.
 - Re-enable `watch` feature by default.
 
-[Unreleased]: https://github.com/abrauchli/usbeehive/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/abrauchli/usbeehive/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/abrauchli/usbeehive/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/abrauchli/usbeehive/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/abrauchli/usbeehive/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/abrauchli/usbeehive/compare/v0.8.0...v0.9.0
