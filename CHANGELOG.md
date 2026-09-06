@@ -75,6 +75,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A D-Bus consumer spec for client authors lives at
   `.planning/specs/DBUS-BOS-CONSUMER-SPEC.md`.
 
+- **Physical connector model — `port` → `peer` → companion `state`.** Every
+  non-root device carries a `port` symlink to the hub-port object it hangs
+  off; every root-hub port carries a `peer` symlink to the port on the
+  *other* speed half of the same physical receptacle. New additive
+  `UsbDevice` fields `port_id`, `port_peer_id`, `port_peer_state` and
+  `port_connect_type` expose them.
+
+  `port_peer_state` is the answer to *why* a device linked below its
+  capability. The BOS work can say "this hub advertises SuperSpeed but
+  negotiated 480 Mbps"; a companion port reading `not attached` says
+  "because the SuperSpeed lanes of that connector never trained" — a USB
+  2.0-only cable, or a USB-A 2.0 receptacle. The two specs are designed to
+  be read together.
+
+- **Hub occupancy and bus-power budget.** `UsbDevice.max_child` and
+  `ports_used` (from the downstream port objects' `state`) give "4-port hub,
+  2 in use". `UsbDevice.bm_attributes` — the config descriptor's
+  `bmAttributes` — finally makes the long-read `bMaxPower` interpretable:
+  `self_powered()` tells a device that *draws* 500 mA from one that merely
+  declares it while running off its own supply, and
+  `hub_power_budget_ma()` / `hub_power_committed_ma()` compare a bus-powered
+  hub's ceiling against what its children have declared. Every figure is a
+  **declared** maximum, never a measured draw.
+
+- **`UsbDevice::quirk_names()`** renders the already-read `quirks` bitmask as
+  `USB_QUIRK_*` names (prefix stripped, ascending by bit), from a snapshot of
+  the Linux 7.0 `include/linux/usb/quirks.h`. Bits a build does not know
+  render as `bit<N>` rather than disappearing, so a newer kernel still
+  reports. "The kernel knows this device is buggy and is working around it"
+  is diagnostic gold — `RESET_RESUME` explains devices that re-enumerate
+  after every sleep, `NO_LPM` explains one that never power-saves.
+
+- **`UsbDevice.product_db`** — the udev hardware-database model name
+  (`ID_MODEL_FROM_DATABASE`, hwdb's rendering of the USB-IF `usb.ids` list),
+  read through the `udev` dependency the `watch` feature already carries. A
+  device that publishes no `iProduct` string was previously headlined
+  `8087:0029`; hwdb names it `AX200 Bluetooth`. The database name also
+  frequently encodes capability the vendor's own string hides — `RTS5411
+  Hub` (a USB 3.0 part) for a device whose `iProduct` says `4-Port USB 2.0
+  Hub`. Advisory and secondary: it never overrides `product`, and is omitted
+  when it adds nothing over it.
+
+- **New additive `properties` keys** on `UsbDevice` / `Hub` entries, all
+  optional: `port.id`, `port.peer_id`, `port.peer_state`,
+  `port.connect_type`, `hub.ports_total`, `hub.ports_used`, `power.source`,
+  `hub.power_budget_ma`, `hub.power_committed_ma`, `kernel.quirks`,
+  `product_db`. The interface stays `org.usbeehive.Devices5` — no tuple
+  shape, method signature, enum or field position changed, and **no new
+  signal** was added.
+
+  `port.peer_state` joins the `DeviceChanged` state fingerprint (together
+  with the static `power.source` and `kernel.quirks`): a companion port
+  training late is exactly the transition consumers want to re-snapshot on.
+  `hub.ports_used` and `hub.power_committed_ma` are deliberately **excluded**
+  — they move only on plug/unplug, which already fires `DeviceAdded` /
+  `DeviceRemoved`. Nothing added can make `DeviceChanged` chatter on an idle
+  machine.
+
+- `SnapshotJson` gains eight `usb_device` fields — `port_id`,
+  `port_peer_id`, `port_peer_state`, `port_connect_type`, `max_child`,
+  `ports_used`, `bm_attributes`, `product_db` — all additive and
+  serde-default, following the `usb_device.bos` precedent. `ports_used` is
+  `null`, never `0`, when no port object was readable.
+
+  A D-Bus consumer spec for client authors lives at
+  `.planning/specs/DBUS-TRIM-CONSUMER-SPEC.md`. It is a deliberately trimmed
+  subset of the wider survey in `.planning/specs/FURTHER-WINS.md` /
+  `.planning/specs/DBUS-FURTHER-SPEC.md`; runtime-PM state (`pm.*`),
+  functional-child identity (`function.*`), interface strings, multi-TT
+  detection and an over-current signal are specified there but **not** shipped
+  — that document's status table says which is which.
+
 ## [0.11.0] - 2026-06-16
 
 ### Added

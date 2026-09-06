@@ -825,6 +825,35 @@ mod dbus_tests {
         assert_eq!(e.usb_version, "2.1");
         assert_eq!(e.port_number, -1);
         assert!(!e.charging_diag.present);
+
+        // SnapshotJson carries the same facts as typed `usb_device` fields,
+        // additively and serde-defaulted (DBUS-TRIM-CONSUMER-SPEC.md §4).
+        let json = iface.snapshot_json_string().expect("snapshot json");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let u = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["usb_device"]["bus_port"] == "5-2")
+            .expect("usb entry")["usb_device"]
+            .clone();
+        assert_eq!(u["port_id"], "usb5-port2");
+        assert_eq!(u["port_peer_id"], "usb6-port2");
+        assert_eq!(u["port_peer_state"], "not attached");
+        assert_eq!(u["port_connect_type"], "hotplug");
+        assert_eq!(u["max_child"], 4);
+        assert_eq!(u["ports_used"], 1);
+        assert_eq!(u["bm_attributes"], 0xa0);
+        // `ports_used` is null, never 0, when no port object was readable.
+        let leaf = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["usb_device"]["bus_port"] == "5-2.1")
+            .expect("leaf entry")["usb_device"]
+            .clone();
+        assert!(leaf["ports_used"].is_null());
+        assert_eq!(leaf["max_child"], 0);
     }
 
     #[test]
