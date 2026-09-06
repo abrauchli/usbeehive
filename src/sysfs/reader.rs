@@ -115,6 +115,36 @@ pub fn read_hex(path: impl AsRef<Path>) -> Option<u32> {
     u32::from_str_radix(stripped, 16).ok()
 }
 
+/// Upper bound on a binary sysfs attribute read by [`read_bytes`].
+///
+/// `bos_descriptors` is a `wTotalLength`-bounded blob, so a few hundred bytes
+/// at most; 64 KiB is generous headroom that still refuses to slurp a
+/// pathological pseudo-file into memory.
+const MAX_BINARY_ATTR_BYTES: u64 = 64 * 1024;
+
+/// Read a **binary** sysfs attribute (e.g. `bos_descriptors`) as raw bytes.
+///
+/// Returns `None` when the file is missing, unreadable, empty, or larger than
+/// [`MAX_BINARY_ATTR_BYTES`]. Same convention as [`read_attr`]: absence is
+/// normal, not an error — see [`super::error::Error`], which is reserved for
+/// misconfiguration rather than missing attributes.
+pub fn read_bytes(path: impl AsRef<Path>) -> Option<Vec<u8>> {
+    let path = path.as_ref();
+    // Guard before reading: sysfs binary attributes report a real size, and
+    // anything absurd is a sign we are not looking at what we think we are.
+    if let Ok(md) = fs::metadata(path) {
+        if md.len() > MAX_BINARY_ATTR_BYTES {
+            return None;
+        }
+    }
+    let bytes = fs::read(path).ok()?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_BINARY_ATTR_BYTES {
+        None
+    } else {
+        Some(bytes)
+    }
+}
+
 /// `true` when the path exists.
 pub fn path_exists(path: impl AsRef<Path>) -> bool {
     path.as_ref().exists()
@@ -208,7 +238,30 @@ mod tests {
         assert!(read_attr("/no/such/path/usbeehive").is_none());
         assert!(read_int("/no/such/path/usbeehive").is_none());
         assert!(read_hex("/no/such/path/usbeehive").is_none());
+        assert!(read_bytes("/no/such/path/usbeehive").is_none());
         assert!(!path_exists("/no/such/path/usbeehive"));
+    }
+
+    #[test]
+    fn read_bytes_returns_raw_binary() {
+        let d = tmp();
+        let p = d.path().join("bos_descriptors");
+        let blob: &[u8] = &[0x05, 0x0f, 0x16, 0x00, 0x02, 0xff, 0x00, 0x80];
+        fs::File::create(&p).unwrap().write_all(blob).unwrap();
+        assert_eq!(read_bytes(&p).as_deref(), Some(blob));
+    }
+
+    #[test]
+    fn read_bytes_rejects_empty_and_oversized() {
+        let d = tmp();
+        let p = d.path().join("empty");
+        fs::File::create(&p).unwrap();
+        assert!(read_bytes(&p).is_none());
+
+        let big = d.path().join("big");
+        let payload = vec![0u8; (MAX_BINARY_ATTR_BYTES + 1) as usize];
+        fs::File::create(&big).unwrap().write_all(&payload).unwrap();
+        assert!(read_bytes(&big).is_none());
     }
 
     #[test]

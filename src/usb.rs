@@ -86,9 +86,32 @@ pub struct UsbDevice {
     /// Sysfs name starts with `"usb"` (a kernel-synthesized root hub).
     pub is_root_hub: bool,
 
+    /// Decoded Binary Object Store (`bos_descriptors`), when the device
+    /// publishes one.
+    ///
+    /// `None` is the normal case for USB 2.0-only devices — the kernel does
+    /// not create the attribute at all. Where `speed` / `rx_lanes` /
+    /// `tx_lanes` report what this link **negotiated**, this reports what the
+    /// device is **capable of**; see [`crate::bos`].
+    #[serde(default)]
+    pub bos: Option<crate::bos::BosDescriptors>,
+
     /// Every regular file in the device's sysfs directory, captured for
     /// `--raw` rendering. Optional: backends may leave this empty.
     pub raw_attributes: BTreeMap<String, String>,
+}
+
+impl UsbDevice {
+    /// Compare the negotiated link speed against the device's advertised
+    /// capability, if it published a BOS.
+    ///
+    /// `None` when the device publishes no BOS — which is normal and must
+    /// never be rendered as a fault.
+    pub fn data_rate(&self) -> Option<crate::bos::DataRateAssessment> {
+        self.bos
+            .as_ref()
+            .map(|b| crate::bos::DataRateAssessment::evaluate(self.speed, b))
+    }
 }
 
 /// USB link-speed tier negotiated for a device's upstream connection.

@@ -42,6 +42,17 @@ pub fn write_attr(dir: &Path, name: &str, value: &str) {
     fs::write(dir.join(name), value).unwrap();
 }
 
+/// Write a raw `bos_descriptors` binary blob for an already-written USB
+/// device. Deliberately a free function rather than a `UsbDeviceFixture`
+/// field: on real hardware the attribute is absent on USB 2.0-only devices,
+/// so "no call" is the default and most fixtures should stay that way.
+#[allow(dead_code)]
+pub fn write_bos(root: &Path, bus_port: &str, blob: &[u8]) {
+    let dir = root.join("bus/usb/devices").join(bus_port);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("bos_descriptors"), blob).unwrap();
+}
+
 /// Add a minimal USB device entry under `<root>/bus/usb/devices/<bus_port>/`.
 pub struct UsbDeviceFixture<'a> {
     pub bus_port: &'a str,

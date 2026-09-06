@@ -112,6 +112,12 @@ fn from_sysfs(path: &Path, name: &str) -> Option<UsbDevice> {
         is_hub: device_class == 0x09,
         is_root_hub: name.starts_with("usb"),
 
+        // Optional by design: USB 2.0-only devices publish no BOS and the
+        // kernel does not create the attribute. Absence is never an error.
+        bos: reader::read_bytes(path.join("bos_descriptors"))
+            .as_deref()
+            .and_then(crate::bos::parse),
+
         interfaces: read_interfaces(path),
         children: Vec::new(),
         raw_attributes: reader::read_all_attrs(path),
