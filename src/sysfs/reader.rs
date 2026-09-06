@@ -125,7 +125,7 @@ const MAX_BINARY_ATTR_BYTES: u64 = 64 * 1024;
 /// Read a **binary** sysfs attribute (e.g. `bos_descriptors`) as raw bytes.
 ///
 /// Returns `None` when the file is missing, unreadable, empty, or larger than
-/// [`MAX_BINARY_ATTR_BYTES`]. Same convention as [`read_attr`]: absence is
+/// the internal 64 KiB cap. Same convention as [`read_attr`]: absence is
 /// normal, not an error — see [`super::error::Error`], which is reserved for
 /// misconfiguration rather than missing attributes.
 pub fn read_bytes(path: impl AsRef<Path>) -> Option<Vec<u8>> {

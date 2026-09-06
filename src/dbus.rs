@@ -31,7 +31,7 @@
 //! |---|---|---|---|
 //! | 1 | `id` | `s` | Stable identifier — `typec:<port>` / `usb:<bus_port>`. |
 //! | 2 | `category` | `s` | `UsbDevice` \| `TypeCPort` \| `Hub`. |
-//! | 3 | `device_class` | `s` | Coarse classification (see [`DeviceClass`]). `Unknown` for Type-C ports. |
+//! | 3 | `device_class` | `s` | Coarse classification (see [`crate::summary::DeviceClass`]). `Unknown` for Type-C ports. |
 //! | 4 | `device_subclass` | `s` | Advisory fine-grain hint (`webcam`, `capture`, `sd_reader`, …). Empty by default. Adding values is non-breaking. |
 //! | 5 | `status` | `s` | `Empty` \| `Connected` \| `Charging` \| `Sourcing`. |
 //! | 6 | `headline` | `s` | Single-line display title (English prose). |

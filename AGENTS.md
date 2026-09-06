@@ -150,7 +150,14 @@ cargo clippy --all-targets -- -D warnings          # clippy gate (CI: lint, defa
 cargo clippy --all-targets --all-features -- -D warnings  # also lint the dbus/daemon code (CI's default-feature clippy skips it)
 cargo test                                         # full suite
 cargo test --no-default-features --features dbus   # daemon + DeviceChanged signal paths
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps     # rustdoc gate (CI: docs) — MISSING from this
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features  # ...and CI's default-feature run skips dbus.rs
 ```
+
+The two `cargo doc` lines were added after v0.12.0 shipped with a red `docs`
+job: a public doc comment linked to a private const, which neither clippy nor
+the test suite catches. Note the second line goes *beyond* CI, which only runs
+default features — `src/dbus.rs` module docs are invisible to CI's rustdoc.
 
 If `cargo fmt --all --check` reports a diff, run `cargo fmt --all` and
 re-stage before committing.
