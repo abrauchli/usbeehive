@@ -507,12 +507,34 @@ pub(crate) fn device_json(dev: &DeviceSummary, show_raw: bool) -> Value {
             "isHub": u.is_hub,
             "interfaces": interfaces,
         });
+        if u.quirks != 0 {
+            usb.as_object_mut()
+                .unwrap()
+                .insert("quirks".into(), Value::Number(u.quirks.into()));
+            usb.as_object_mut().unwrap().insert(
+                "bosSuppressedByQuirk".into(),
+                Value::Bool(u.bos_suppressed_by_quirk()),
+            );
+        }
+        if let Some(bos) = &u.bos {
+            if let Ok(v) = serde_json::to_value(bos) {
+                usb.as_object_mut().unwrap().insert("bos".into(), v);
+            }
+        }
         if show_raw {
             usb.as_object_mut()
                 .unwrap()
                 .insert("raw".into(), raw_to_value(&u.raw_attributes));
         }
         obj.insert("usb".into(), usb);
+    }
+
+    // Capability-vs-negotiated data rate. Absent (not null) when the device
+    // published no BOS — the normal USB 2.0-only case.
+    if let Some(a) = &dev.data_rate {
+        if let Ok(v) = serde_json::to_value(a) {
+            obj.insert("dataRate".into(), v);
+        }
     }
 
     if let Some(tc) = &dev.typec_port {

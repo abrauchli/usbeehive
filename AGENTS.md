@@ -23,6 +23,7 @@ usbeehive/
 │   ├── lib.rs                          # public re-exports + module roots
 │   ├── main.rs                         # CLI entry (gated on `cli` feature)
 │   ├── output.rs                       # CLI text / JSON rendering
+│   ├── bos.rs                          # USB BOS descriptor decoder ← always
 │   ├── pd.rs                           # USB-PD VDO decoders        ← always
 │   ├── usb.rs                          # UsbDevice / UsbInterface   ← always
 │   ├── typec.rs                        # TypeCPort / Cable / …      ← always
@@ -121,6 +122,7 @@ Manual smoke tests:
 | File | Purpose |
 |---|---|
 | `src/pd.rs` | USB-PD VDO bit-field decoders |
+| `src/bos.rs` | USB BOS descriptor decoder + `DataRateAssessment` (capability vs negotiated link speed) |
 | `src/diagnostic.rs` | Charging-bottleneck classifier |
 | `src/summary.rs` | Plain-English `DeviceSummary` |
 | `src/sysfs/reader.rs` | `Sysfs` handle + `read_attr` / `read_int` / `read_hex` |

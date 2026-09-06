@@ -5,6 +5,76 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **USB BOS (Binary Object Store) decoding — capability vs negotiated data
+  rate.** New always-compiled `usbeehive::bos` module parses
+  `/sys/bus/usb/devices/*/bos_descriptors`, the blob that says what a device
+  is *capable* of, as opposed to `speed` / `rx_lanes` / `tx_lanes` which say
+  only what the link *negotiated*.
+
+  Decodes USB 2.0 Extension (`0x02`), SuperSpeed (`0x03`), Container ID
+  (`0x04`), SuperSpeedPlus (`0x0A`) and Billboard (`0x0D`). Unknown
+  capability types are preserved verbatim rather than dropped. Parsing is
+  hostile-input safe: it never panics and never loops on a zero `bLength`,
+  and reports partial results via a `truncated` flag.
+
+  The SuperSpeedPlus sublink speed attribute array is fully decoded because
+  it is the only honest way to distinguish **Gen 1x2** from **Gen 2x1** —
+  both aggregate to 10 Gbps and both report `speed == 10000`.
+
+- **`DeviceSummary.data_rate`** — a `DataRateAssessment` comparing the
+  negotiated link speed with the BOS-advertised maximum. Deliberately a
+  separate vocabulary from the power-side `Bottleneck` /
+  `ChargingDiagnostic`: those are keyed on Type-C port numbers, while a
+  data-rate shortfall lands on a plain USB device behind a hub that has no
+  port number at all.
+
+  The warning is **conservative by design**. A device is flagged `Degraded`
+  only when the negotiated speed falls below the vendor's own
+  `bFunctionalitySupport` floor. A device that advertises SuperSpeed but
+  declares full functionality at High Speed, and is linked at High Speed, is
+  `BelowCapability` — informational, never a warning. Without this rule the
+  feature would fire on a large fraction of ordinary, working hardware.
+
+- **New `DataRateDegraded(id, summary, detail)` and `DataRateRestored(id)`
+  D-Bus signals**, keyed on the summary `id` string. Both are **additive** —
+  the interface stays `org.usbeehive.Devices5`, same as the 0.10.x
+  `DeviceChanged` precedent. A verdict change also flips the curated state
+  fingerprint, so `DeviceChanged` continues to fire for the same id and
+  snapshot-driven consumers stay correct without subscribing.
+
+- **New additive `properties` keys** on `UsbDevice` / `Hub` entries, all
+  optional: `usb_capable_speed_mbps`, `usb_capable_speed`,
+  `usb_capable_gen`, `usb_capable_rx_lanes`, `usb_capable_tx_lanes`,
+  `usb_functional_floor_mbps`, `usb_link_verdict`, `usb_bos_container_id`,
+  `usb_altmode_svids`, `usb_altmode_state`, `usb_altmode_failure`, plus the
+  flag keys `usb_link_degraded` and `usb_bos_suppressed`. Adding keys to the
+  `a(ss)` bag is documented as non-breaking; no tuple shape changed.
+
+- **`UsbDevice.quirks`** — the kernel's per-device quirk bitmask. Bit 17
+  (`USB_QUIRK_NO_BOS`) means the kernel deliberately never reads the
+  device's BOS, so a missing `bos_descriptors` does **not** imply "USB 2.0
+  only". `UsbDevice::bos_suppressed_by_quirk()` distinguishes the two
+  causes, and the `usb_bos_suppressed` property key surfaces it to clients
+  so they never render "no BOS" as a capability shortfall.
+
+- **Billboard capability decoding** — alternate-mode SVIDs, the
+  2-bits-per-mode `bmConfigured` state array, and `bAdditionalFailureInfo`.
+  A USB-C monitor that failed to enter DisplayPort alt mode is exactly the
+  actionable verdict this project exists to give. Surfaced as facts only —
+  no warning flag and no signal — because a Billboard device that never
+  attempted a mode is often simply not on a Type-C port.
+
+- `SnapshotJson` gains `data_rate` per entry plus `usb_device.bos` and
+  `usb_device.quirks`; `--json` gains `dataRate` and `usb.bos`. All additive
+  and serde-default, following the `TypeCPartner.usb_name` precedent.
+
+  A D-Bus consumer spec for client authors lives at
+  `.planning/specs/DBUS-BOS-CONSUMER-SPEC.md`.
+
 ## [0.11.0] - 2026-06-16
 
 ### Added
