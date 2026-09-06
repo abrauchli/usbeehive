@@ -42,7 +42,7 @@
 //! | 11 | `vendor_id` | `q` | `idVendor` (uint16). Zero for non-USB. |
 //! | 12 | `product_id` | `q` | `idProduct` (uint16). Zero for non-USB. |
 //! | 13 | `primary_driver` | `s` | Kernel driver bound to the device's first interface. Empty when unbound. |
-//! | 14 | `properties` | `a(ss)` | `(machine_key, value)` pairs. Adding keys is non-breaking; renaming/removing requires an interface bump. Additive keys added in 0.10.0: `usb_device` = `usb:<bus_port>` of the enumerated USB device correlated to this Type-C port via the partner's USB child node; present only on `TypeCPort` entries whose partner enumerated a USB device; adding it is non-breaking. The new JSON-only `TypeCPartner.usb_name` field (the partner's USB child dir basename) is also surfaced through `SnapshotJson` (additive, serde default-empty). |
+//! | 14 | `properties` | `a(ss)` | `(machine_key, value)` pairs. Adding keys is non-breaking; renaming/removing requires an interface bump. Additive keys added in 0.10.0: `usb_device` = `usb:<bus_port>` of the enumerated USB device correlated to this Type-C port via the partner's USB child node; present only on `TypeCPort` entries whose partner enumerated a USB device; adding it is non-breaking. The new JSON-only `TypeCPartner.usb_name` field (the partner's USB child dir basename) is also surfaced through `SnapshotJson` (additive, serde default-empty). Additive BOS keys (see below): `usb_capable_speed_mbps`, `usb_capable_speed`, `usb_capable_gen`, `usb_capable_rx_lanes`, `usb_capable_tx_lanes`, `usb_functional_floor_mbps`, `usb_link_verdict`, `usb_link_degraded`, `usb_bos_container_id`. |
 //! | 15 | `port_number` | `i` | Type-C port number, `-1` otherwise. |
 //! | 16 | `link_speed_mbps` | `u` | Negotiated USB link speed in Mbps, `0` if unknown. |
 //! | 17 | `usb_version` | `s` | Canonical short form (`"2.0"`, `"3.2"`, `"4.0"`). Empty if unknown. |
@@ -67,6 +67,39 @@
 //! | `DeviceChanged` (signal) | `s` | `id` of a present device/port whose curated user-visible state changed. Additive (0.10.x); does not bump the interface. |
 //! | `CapabilityDegraded` (signal) | `(iss)` | `(port_number, summary, detail)` when a port's charging diagnostic newly raises `is_warning`. |
 //! | `CapabilityRestored` (signal) | `i` | `port_number` whose previous warning has cleared. |
+//! | `DataRateDegraded` (signal) | `(sss)` | `(id, summary, detail)` when a USB device's link negotiated **below the speed its own BOS declares it needs**. Keyed on the summary `id` string — the affected device usually has no Type-C port number. Additive; does not bump the interface. |
+//! | `DataRateRestored` (signal) | `s` | `id` of a device whose previous data-rate warning has cleared. Additive. |
+//!
+//! ## Capability (BOS) properties
+//!
+//! `/sys/bus/usb/devices/*/bos_descriptors` publishes the device's Binary
+//! Object Store — what it is **capable** of, as opposed to `link_speed_mbps`
+//! which is what the link **negotiated**. Decoding it (see [`crate::bos`])
+//! adds these keys to the `properties` bag of `UsbDevice` / `Hub` entries.
+//! **Every one is optional** — USB 2.0-only devices publish no BOS at all,
+//! which is normal and must never render as a fault.
+//!
+//! | Key | Value | Notes |
+//! |---|---|---|
+//! | `usb_capable_speed_mbps` | decimal Mbps | Highest aggregate rate the device advertises. Absent when the BOS carries no speed-bearing capability. |
+//! | `usb_capable_speed` | label | Same figure as a [`crate::usb::LinkSpeed`] label, e.g. `"SuperSpeed 5 Gbps"`. |
+//! | `usb_capable_gen` | `"Gen 2x1"` … | USB-IF generation, from the SuperSpeedPlus sublink array. The only honest way to tell Gen 1x2 from Gen 2x1 — both aggregate to 10 Gbps. Absent without a SuperSpeedPlus capability. |
+//! | `usb_capable_rx_lanes` / `usb_capable_tx_lanes` | decimal | Minimum lane counts the device declares. |
+//! | `usb_functional_floor_mbps` | decimal Mbps | `bFunctionalitySupport` — the **vendor's own** declared speed floor for full functionality. Absent when undeclared or self-contradictory. |
+//! | `usb_link_verdict` | `AtCapability` \| `BelowCapability` \| `Degraded` | Absent when `Unknown`. Follows the enum-extensibility convention below. |
+//! | `usb_link_degraded` | `"true"` | Flag key — **present only when it fires**, i.e. only for `usb_link_verdict == Degraded`. |
+//! | `usb_bos_container_id` | UUID string | Container ID capability, lowercase hyphenated. Absent when unpublished or all-zero. |
+//!
+//! `usb_link_degraded` is deliberately conservative: a device is flagged only
+//! when the negotiated speed falls below the vendor's own
+//! `bFunctionalitySupport` floor. A device that advertises SuperSpeed but
+//! declares full functionality at High Speed and is linked at High Speed is
+//! `BelowCapability` (informational), not a warning.
+//!
+//! `SnapshotJson` additionally carries the full typed
+//! [`crate::bos::DataRateAssessment`] as `data_rate` on every summary, plus
+//! the raw decoded BOS at `usb_device.bos`. Both are additive and
+//! serde-default (`null`), matching the `TypeCPartner.usb_name` precedent.
 //!
 //! # Migrating from `Devices4`
 //!
@@ -369,6 +402,13 @@ impl DevicesIface {
             .collect()
     }
 
+    /// Helper for tests / in-process clients. Returns the exact string
+    /// `SnapshotJson` returns over the wire.
+    pub fn snapshot_json_string(&self) -> Result<String, serde_json::Error> {
+        let state = self.state.lock().expect("state mutex poisoned");
+        serde_json::to_string(state.manager.devices())
+    }
+
     /// Helper for tests / in-process clients. Returns the same payload as
     /// `Diagnose(port)` over the wire.
     pub fn diagnose_port(&self, port_number: i32) -> DiagnosticEntry {
@@ -410,8 +450,7 @@ impl DevicesIface {
     /// CLI's `--json` output so any client can deserialise it without
     /// re-deriving D-Bus types for every nested field.
     fn snapshot_json(&self) -> zbus::fdo::Result<String> {
-        let state = self.state.lock().expect("state mutex poisoned");
-        serde_json::to_string(state.manager.devices())
+        self.snapshot_json_string()
             .map_err(|e| zbus::fdo::Error::Failed(format!("serde_json: {e}")))
     }
 
@@ -476,6 +515,29 @@ impl DevicesIface {
         emitter: &SignalEmitter<'_>,
         port_number: i32,
     ) -> zbus::Result<()>;
+
+    /// Emitted when a USB device's **data-rate** assessment newly raises
+    /// `is_warning` — the link negotiated below the speed the device's own
+    /// BOS declares it needs for full functionality.
+    ///
+    /// Keyed on the summary `id` string, not a Type-C port number: the
+    /// affected device is usually a plain USB device behind a hub and has no
+    /// port number. Payload duplicates the `usb_link_*` properties' prose so
+    /// the signal is self-contained for notification UX.
+    ///
+    /// Additive — does not bump the interface, same as `DeviceChanged`.
+    #[zbus(signal)]
+    pub async fn data_rate_degraded(
+        emitter: &SignalEmitter<'_>,
+        id: String,
+        summary: String,
+        detail: String,
+    ) -> zbus::Result<()>;
+
+    /// Emitted when a device that was previously raising a data-rate warning
+    /// no longer is — e.g. the user moved it to a faster port.
+    #[zbus(signal)]
+    pub async fn data_rate_restored(emitter: &SignalEmitter<'_>, id: String) -> zbus::Result<()>;
 }
 
 /// Bus name the daemon requests on the session bus.

@@ -28,9 +28,16 @@ pub struct Snapshot {
 /// What changed between two [`Snapshot`]s.
 ///
 /// Computed by [`Snapshot::diff`]. Identifiers come from
-/// [`DeviceSummary::id`] (`"typec:port0"`, `"usb:1-1.4"`, …). The
-/// `*_degraded` and `*_resolved` lists carry Type-C port numbers — those
-/// are the only summaries that can carry a [`crate::ChargingDiagnostic`].
+/// [`DeviceSummary::id`] (`"typec:port0"`, `"usb:1-1.4"`, …).
+///
+/// Two independent degradation channels, keyed differently on purpose:
+///
+/// - `newly_degraded` / `resolved` carry Type-C **port numbers** — the
+///   power-side [`crate::ChargingDiagnostic`], which only Type-C summaries
+///   can hold.
+/// - `newly_rate_degraded` / `rate_restored` carry summary **ids** — the
+///   data-side [`crate::bos::DataRateAssessment`], which lands on plain USB
+///   devices that have no port number at all.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotDiff {
     /// Summary ids that exist in `self` but not in the previous snapshot.
@@ -45,9 +52,20 @@ pub struct SnapshotDiff {
     pub resolved: Vec<i32>,
     /// Summary ids present in BOTH snapshots whose curated user-visible
     /// state changed (status, power/data role, transport flags, link speed,
-    /// USB version, active PDO index, primary driver) — excludes raw power
-    /// magnitudes so 500ms mW/mV jitter does not wake consumers.
+    /// USB version, active PDO index, primary driver, data-rate verdict) —
+    /// excludes raw power magnitudes so 500ms mW/mV jitter does not wake
+    /// consumers.
     pub changed: Vec<String>,
+    /// Summary **ids** whose data-rate assessment newly raised `is_warning`
+    /// (or which appeared already warning).
+    ///
+    /// Deliberately ids, not port numbers: a data-rate shortfall lands on a
+    /// plain USB device behind a hub, which has no Type-C port number. This
+    /// is why it cannot reuse `newly_degraded` / `CapabilityDegraded (iss)`.
+    pub newly_rate_degraded: Vec<String>,
+    /// Summary ids whose previously-warning data-rate assessment cleared
+    /// (e.g. the user moved the device to a faster port).
+    pub rate_restored: Vec<String>,
 }
 
 impl SnapshotDiff {
@@ -58,6 +76,8 @@ impl SnapshotDiff {
             && self.newly_degraded.is_empty()
             && self.resolved.is_empty()
             && self.changed.is_empty()
+            && self.newly_rate_degraded.is_empty()
+            && self.rate_restored.is_empty()
     }
 }
 
@@ -137,12 +157,34 @@ impl Snapshot {
             })
             .collect();
 
+        // Data-rate warnings, keyed on the summary id (see the field docs on
+        // `newly_rate_degraded` for why this cannot reuse port numbers).
+        let prev_rate_warn: HashMap<String, bool> = previous
+            .summaries
+            .iter()
+            .map(|s| (s.id(), s.data_rate.as_ref().is_some_and(|d| d.is_warning)))
+            .collect();
+
+        let mut newly_rate_degraded = Vec::new();
+        let mut rate_restored = Vec::new();
+        for s in &self.summaries {
+            let id = s.id();
+            let now_warn = s.data_rate.as_ref().is_some_and(|d| d.is_warning);
+            match prev_rate_warn.get(&id).copied() {
+                Some(true) if !now_warn => rate_restored.push(id),
+                Some(false) | None if now_warn => newly_rate_degraded.push(id),
+                _ => {}
+            }
+        }
+
         SnapshotDiff {
             added,
             removed,
             newly_degraded,
             resolved,
             changed,
+            newly_rate_degraded,
+            rate_restored,
         }
     }
 }
@@ -166,7 +208,7 @@ fn state_fingerprint(s: &crate::summary::DeviceSummary) -> String {
     let mut curated_props: Vec<(&str, &str)> = s
         .properties
         .iter()
-        .filter(|(k, _)| k == "data_role" || k.starts_with("transport."))
+        .filter(|(k, _)| k == "data_role" || k == "usb_link_verdict" || k.starts_with("transport."))
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
     curated_props.sort_by_key(|(k, _)| *k);

@@ -546,6 +546,121 @@ mod dbus_tests {
         assert!(!port.properties.iter().any(|(k, _)| k == "transport.usb4"));
     }
 
+    /// Real blob from a "USB 10/100/1000 LAN" adapter: SuperSpeed-capable,
+    /// full functionality declared at High Speed.
+    const BOS_LAN_SUPERSPEED: &[u8] = &[
+        0x05, 0x0f, 0x16, 0x00, 0x02, //
+        0x07, 0x10, 0x02, 0x06, 0x00, 0x00, 0x00, //
+        0x0a, 0x10, 0x03, 0x02, 0x0e, 0x00, 0x02, 0x0a, 0xff, 0x07,
+    ];
+
+    fn write_lan(root: &std::path::Path, speed_mbps: u32) {
+        UsbDeviceFixture {
+            bus_port: "5-2",
+            vendor: 0x0B95,
+            product: 0x1790,
+            product_name: "USB 10/100/1000 LAN",
+            manufacturer: "ASIX",
+            serial: "",
+            speed_mbps,
+            max_power_ma: 250,
+            version: "2.10",
+            device_class: 0x00,
+            bus_num: 5,
+            dev_num: 4,
+            removable: "removable",
+            interfaces: &[],
+        }
+        .write(root);
+        write_bos(root, "5-2", BOS_LAN_SUPERSPEED);
+    }
+
+    #[test]
+    fn bos_keys_ride_the_properties_bag_not_the_tuple_shape() {
+        let root = TempRoot::new("dbus-bos-additive");
+        write_lan(root.path(), 480);
+        let state = make_state(root.path());
+        state.lock().unwrap().refresh();
+        let iface = DevicesIface { state };
+
+        let entries = iface.snapshot_entries();
+        let e = entries.iter().find(|e| e.id == "usb:5-2").expect("entry");
+
+        let get = |k: &str| {
+            e.properties
+                .iter()
+                .find(|(pk, _)| pk == k)
+                .map(|(_, v)| v.clone())
+        };
+        assert_eq!(get("usb_capable_speed_mbps").as_deref(), Some("5000"));
+        assert_eq!(
+            get("usb_capable_speed").as_deref(),
+            Some("SuperSpeed 5 Gbps")
+        );
+        assert_eq!(get("usb_functional_floor_mbps").as_deref(), Some("480"));
+        assert_eq!(get("usb_link_verdict").as_deref(), Some("BelowCapability"));
+        // Conservative: linked at the vendor's own declared floor, so no flag.
+        assert_eq!(get("usb_link_degraded"), None);
+
+        // The typed tuple fields are untouched — the interface stays Devices5.
+        assert_eq!(e.link_speed_mbps, 480);
+        assert_eq!(e.usb_version, "2.1");
+        assert!(!e.charging_diag.present);
+        assert_eq!(e.port_number, -1);
+    }
+
+    #[test]
+    fn degraded_link_sets_the_flag_key_and_verdict() {
+        let root = TempRoot::new("dbus-bos-degraded");
+        write_lan(root.path(), 12);
+        let state = make_state(root.path());
+        state.lock().unwrap().refresh();
+        let iface = DevicesIface { state };
+
+        let entries = iface.snapshot_entries();
+        let e = entries.iter().find(|e| e.id == "usb:5-2").unwrap();
+        assert!(e
+            .properties
+            .iter()
+            .any(|(k, v)| k == "usb_link_verdict" && v == "Degraded"));
+        assert!(e
+            .properties
+            .iter()
+            .any(|(k, v)| k == "usb_link_degraded" && v == "true"));
+        // Still NOT a charging diagnostic — the two concepts stay separate.
+        assert!(!e.charging_diag.present);
+    }
+
+    #[test]
+    fn snapshot_json_carries_data_rate_and_raw_bos() {
+        let root = TempRoot::new("dbus-bos-json");
+        write_lan(root.path(), 12);
+        let state = make_state(root.path());
+        state.lock().unwrap().refresh();
+        let iface = DevicesIface { state };
+
+        let json = iface.snapshot_json_string().expect("snapshot json");
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let entry = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["usb_device"]["bus_port"] == "5-2")
+            .expect("usb entry");
+
+        assert_eq!(entry["data_rate"]["verdict"], "Degraded");
+        assert_eq!(entry["data_rate"]["capable_mbps"], 5000);
+        assert_eq!(entry["data_rate"]["functional_floor_mbps"], 480);
+        assert_eq!(entry["data_rate"]["is_warning"], true);
+
+        let caps = entry["usb_device"]["bos"]["capabilities"]
+            .as_array()
+            .expect("decoded capabilities");
+        assert_eq!(caps.len(), 2);
+        assert_eq!(caps[1]["kind"], "SuperSpeed");
+        assert_eq!(caps[1]["speeds_supported"], 14);
+    }
+
     #[test]
     fn dbus_constants_match_freedesktop_naming() {
         // Soft sanity guard — these strings end up in `.service` files,

@@ -211,6 +211,16 @@ pub struct DeviceSummary {
     /// Computed charging diagnostic. Present only when the port is
     /// actively sinking PD power.
     pub charging_diag: Option<ChargingDiagnostic>,
+    /// Computed **data-rate** assessment — negotiated link speed versus what
+    /// the device's BOS says it can do. Present only for USB devices that
+    /// published a Binary Object Store; `None` on USB 2.0-only devices and
+    /// on every Type-C port entry.
+    ///
+    /// Deliberately separate from [`Self::charging_diag`]: that one is
+    /// power-side and keyed on Type-C port numbers, this one is data-side
+    /// and keyed on the summary [`Self::id`]. See [`crate::bos`].
+    #[serde(default)]
+    pub data_rate: Option<crate::bos::DataRateAssessment>,
 
     /// Original USB device, if this summary describes one.
     pub usb_device: Option<UsbDevice>,
@@ -637,6 +647,77 @@ impl DeviceSummary {
             properties.push(("transport.usb3".into(), "true".into()));
         }
 
+        // Capability (BOS) vs negotiated link. Every key here is optional —
+        // USB 2.0-only devices publish no BOS at all, which is normal, so
+        // absence must never render as a fault.
+        let data_rate = dev.data_rate();
+        if let Some(bos) = &dev.bos {
+            if let Some(cid) = bos.container_id_string() {
+                properties.push(("usb_bos_container_id".into(), cid));
+            }
+            if let Some((rx, tx)) = bos.lane_counts() {
+                if rx > 0 {
+                    properties.push(("usb_capable_rx_lanes".into(), rx.to_string()));
+                }
+                if tx > 0 {
+                    properties.push(("usb_capable_tx_lanes".into(), tx.to_string()));
+                }
+            }
+            // Billboard: why an alternate mode is (not) up. Facts only — no
+            // warning flag and no signal, because a Billboard device that
+            // never attempted a mode is often simply not plugged into a
+            // Type-C port at all.
+            if let Some(bb) = bos.billboard() {
+                let svids: Vec<String> = bb
+                    .alt_modes
+                    .iter()
+                    .map(|m| format!("{:04x}", m.svid))
+                    .collect();
+                if !svids.is_empty() {
+                    properties.push(("usb_altmode_svids".into(), svids.join(",")));
+                }
+                if let Some(state) = bb.overall_state() {
+                    properties.push(("usb_altmode_state".into(), state.label().into()));
+                }
+                let reasons = bb.failure_reasons();
+                if !reasons.is_empty() {
+                    properties.push(("usb_altmode_failure".into(), reasons.join(",")));
+                }
+            }
+        } else if dev.bos_suppressed_by_quirk() {
+            // The kernel refuses to read this device's BOS
+            // (USB_QUIRK_NO_BOS). Absence here says nothing about what the
+            // device can do — surface that explicitly so a client never
+            // renders "no BOS" as "USB 2.0 only".
+            properties.push(("usb_bos_suppressed".into(), "true".into()));
+        }
+        if let Some(a) = &data_rate {
+            if a.capable_mbps > 0 {
+                properties.push(("usb_capable_speed_mbps".into(), a.capable_mbps.to_string()));
+                properties.push((
+                    "usb_capable_speed".into(),
+                    crate::usb::speed_label(a.capable_mbps).into(),
+                ));
+            }
+            if !a.capable_gen.is_empty() {
+                properties.push(("usb_capable_gen".into(), a.capable_gen.clone()));
+            }
+            if a.functional_floor_mbps > 0 {
+                properties.push((
+                    "usb_functional_floor_mbps".into(),
+                    a.functional_floor_mbps.to_string(),
+                ));
+            }
+            if a.verdict != crate::bos::DataRateVerdict::Unknown {
+                properties.push(("usb_link_verdict".into(), a.verdict.label().into()));
+            }
+            // Flag key — present only when it fires, per the convention used
+            // by the transport.* / cable.trust.* families.
+            if a.is_warning {
+                properties.push(("usb_link_degraded".into(), "true".into()));
+            }
+        }
+
         DeviceSummary {
             category: if dev.is_hub {
                 Category::Hub
@@ -659,6 +740,7 @@ impl DeviceSummary {
             usb_version: canonical_usb_version(&dev.version),
             power: PowerSummary::default(),
             charging_diag: None,
+            data_rate,
             usb_device: Some(dev.clone()),
             typec_port: None,
             power_delivery: None,
@@ -711,6 +793,10 @@ impl DeviceSummary {
             usb_version: String::new(),
             power: PowerSummary::default(),
             charging_diag: None,
+            // Type-C port entries carry no data-rate assessment: the BOS
+            // belongs to the enumerated USB device, which gets its own
+            // summary entry (correlated via the `usb_device` property).
+            data_rate: None,
             usb_device: None,
             typec_port: Some(port.clone()),
             power_delivery: pd,

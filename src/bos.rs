@@ -61,6 +61,19 @@ const CAP_USB_2_0_EXTENSION: u8 = 0x02;
 const CAP_SUPERSPEED_USB: u8 = 0x03;
 const CAP_CONTAINER_ID: u8 = 0x04;
 const CAP_SUPERSPEED_PLUS: u8 = 0x0A;
+const CAP_BILLBOARD: u8 = 0x0D;
+
+/// Fixed part of a Billboard Capability descriptor, measured from `bLength`
+/// (i.e. including the 3-byte descriptor prefix). Alternate-mode entries
+/// follow, 4 bytes each.
+const BILLBOARD_FIXED_LEN: usize = 44;
+/// Size of one Billboard alternate-mode entry
+/// (`wSVID`, `bAlternateOrUSB4Mode`, `iAlternateOrUSB4ModeString`).
+const BILLBOARD_ALT_MODE_LEN: usize = 4;
+/// Offset of `bmConfigured` within the descriptor body (post-3-byte prefix).
+const BILLBOARD_BM_CONFIGURED_OFF: usize = 5;
+/// `bmConfigured` is a 32-byte array holding 2 status bits per mode.
+const BILLBOARD_BM_CONFIGURED_LEN: usize = 32;
 
 /// Speed the device advertises via `wSpeedsSupported` bit 0 (Low Speed,
 /// nominally 1.5 Mbps). Reported as `2` so it lands in the crate's
@@ -381,6 +394,136 @@ impl SuperSpeedPlusCapability {
     }
 }
 
+/// Configuration state of one Billboard alternate mode, from the 2-bit
+/// field the device publishes in `bmConfigured`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum AltModeState {
+    /// `0b00` — unspecified error.
+    UnspecifiedError,
+    /// `0b01` — configuration was never attempted.
+    NotAttempted,
+    /// `0b10` — configuration was attempted and failed.
+    Unsuccessful,
+    /// `0b11` — configuration succeeded; the mode is active.
+    Successful,
+}
+
+impl AltModeState {
+    fn from_bits(bits: u8) -> Self {
+        match bits & 0x3 {
+            0 => AltModeState::UnspecifiedError,
+            1 => AltModeState::NotAttempted,
+            2 => AltModeState::Unsuccessful,
+            _ => AltModeState::Successful,
+        }
+    }
+
+    /// Stable machine string for the D-Bus `properties` bag and JSON.
+    pub fn label(self) -> &'static str {
+        match self {
+            AltModeState::UnspecifiedError => "UnspecifiedError",
+            AltModeState::NotAttempted => "NotAttempted",
+            AltModeState::Unsuccessful => "Unsuccessful",
+            AltModeState::Successful => "Successful",
+        }
+    }
+}
+
+/// One alternate-mode entry from a Billboard capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct BillboardAltMode {
+    /// Position in the descriptor's alternate-mode array — the index whose
+    /// 2-bit status was read out of `bmConfigured`.
+    pub index: u8,
+    /// `wSVID` — Standard or Vendor ID. `0xFF01` is DisplayPort.
+    pub svid: u16,
+    /// `bAlternateOrUSB4Mode` — the mode index within that SVID.
+    pub mode: u8,
+    /// Configuration state read from `bmConfigured`.
+    pub state: AltModeState,
+}
+
+impl BillboardAltMode {
+    /// Human-facing name for well-known SVIDs, or `None`.
+    pub fn svid_name(&self) -> Option<&'static str> {
+        match self.svid {
+            0xFF01 => Some("DisplayPort"),
+            0x8087 => Some("Thunderbolt"),
+            _ => None,
+        }
+    }
+}
+
+/// Decoded Billboard capability (`bDevCapabilityType == 0x0D`).
+///
+/// A USB Billboard device is what a USB-C dock or monitor enumerates as when
+/// an alternate mode was *not* successfully entered — the descriptor exists
+/// precisely to explain why. That makes it directly actionable: a monitor
+/// reporting `DisplayPort` / [`AltModeState::Unsuccessful`] with
+/// [`Self::no_usb_pd_communication`] set is a "wrong cable" verdict.
+///
+/// Defined by the *USB Device Class Definition for Billboard Devices*,
+/// not the core USB spec.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct BillboardCapability {
+    /// `bNumberOfAlternateOrUSB4Modes` as declared. May exceed
+    /// `alt_modes.len()` when the descriptor was short.
+    pub num_alternate_modes: u8,
+    /// `bPreferredAlternateOrUSB4Mode` — index into the alternate-mode array.
+    pub preferred_alternate_mode: u8,
+    /// `VCONN Power` field, raw.
+    pub vconn_power: u16,
+    /// `bcdVersion` of the Billboard descriptor.
+    pub bcd_version: u16,
+    /// `bAdditionalFailureInfo`, raw.
+    pub additional_failure_info: u8,
+    /// `bAdditionalFailureInfo` bit 0 — the device saw no USB-PD
+    /// communication (no PD support on the other end, or PD negotiation
+    /// failed). The classic passive-cable / non-PD-port symptom.
+    pub no_usb_pd_communication: bool,
+    /// `bAdditionalFailureInfo` bit 1 — insufficient power / no battery.
+    pub no_battery_power: bool,
+    /// Decoded alternate-mode entries, in descriptor order.
+    pub alt_modes: Vec<BillboardAltMode>,
+}
+
+impl BillboardCapability {
+    /// `true` when at least one alternate mode reports
+    /// [`AltModeState::Successful`].
+    pub fn any_mode_active(&self) -> bool {
+        self.alt_modes
+            .iter()
+            .any(|m| m.state == AltModeState::Successful)
+    }
+
+    /// The most noteworthy state across all modes — `Successful` when any
+    /// mode came up, else the first non-successful state in descriptor
+    /// order. `None` when the descriptor lists no modes.
+    pub fn overall_state(&self) -> Option<AltModeState> {
+        if self.alt_modes.is_empty() {
+            return None;
+        }
+        if self.any_mode_active() {
+            return Some(AltModeState::Successful);
+        }
+        self.alt_modes.first().map(|m| m.state)
+    }
+
+    /// Machine-readable failure reasons from `bAdditionalFailureInfo`
+    /// (`"no_usb_pd"`, `"no_battery"`), in bit order. Empty when the device
+    /// reports no additional failure information.
+    pub fn failure_reasons(&self) -> Vec<&'static str> {
+        let mut out = Vec::new();
+        if self.no_usb_pd_communication {
+            out.push("no_usb_pd");
+        }
+        if self.no_battery_power {
+            out.push("no_battery");
+        }
+        out
+    }
+}
+
 /// One decoded Device Capability descriptor.
 ///
 /// Unknown `bDevCapabilityType` values are preserved verbatim as
@@ -401,6 +544,8 @@ pub enum BosCapability {
     },
     /// `0x0A` — SuperSpeedPlus USB Device Capability.
     SuperSpeedPlus(SuperSpeedPlusCapability),
+    /// `0x0D` — Billboard capability (alternate-mode status).
+    Billboard(BillboardCapability),
     /// Any other `bDevCapabilityType`, kept with its payload so nothing is
     /// silently lost.
     Other {
@@ -420,6 +565,7 @@ impl BosCapability {
             BosCapability::SuperSpeed(_) => CAP_SUPERSPEED_USB,
             BosCapability::ContainerId { .. } => CAP_CONTAINER_ID,
             BosCapability::SuperSpeedPlus(_) => CAP_SUPERSPEED_PLUS,
+            BosCapability::Billboard(_) => CAP_BILLBOARD,
             BosCapability::Other { cap_type, .. } => *cap_type,
         }
     }
@@ -455,6 +601,14 @@ impl BosDescriptors {
     pub fn superspeed_plus(&self) -> Option<&SuperSpeedPlusCapability> {
         self.capabilities.iter().find_map(|c| match c {
             BosCapability::SuperSpeedPlus(s) => Some(s),
+            _ => None,
+        })
+    }
+
+    /// The Billboard capability, if the device published one.
+    pub fn billboard(&self) -> Option<&BillboardCapability> {
+        self.capabilities.iter().find_map(|c| match c {
+            BosCapability::Billboard(b) => Some(b),
             _ => None,
         })
     }
@@ -819,6 +973,56 @@ fn decode_capability(cap_type: u8, body: &[u8]) -> BosCapability {
                 min_rx_lane_count: ((func >> 8) & 0xF) as u8,
                 min_tx_lane_count: ((func >> 12) & 0xF) as u8,
                 sublink_attrs,
+            })
+        }
+        CAP_BILLBOARD if body.len() >= BILLBOARD_FIXED_LEN - 3 => {
+            // Body layout (descriptor offsets minus the 3-byte prefix):
+            //   0      iAdditionalInfoURL
+            //   1      bNumberOfAlternateOrUSB4Modes
+            //   2      bPreferredAlternateOrUSB4Mode
+            //   3..5   VCONN Power
+            //   5..37  bmConfigured (2 status bits per mode)
+            //   37..39 bcdVersion
+            //   39     bAdditionalFailureInfo
+            //   40     bReserved
+            //   41..   alternate-mode entries, 4 bytes each
+            let declared = body[1];
+            let failure = body[39];
+            let bm = &body[BILLBOARD_BM_CONFIGURED_OFF
+                ..BILLBOARD_BM_CONFIGURED_OFF + BILLBOARD_BM_CONFIGURED_LEN];
+
+            let entries = &body[BILLBOARD_FIXED_LEN - 3..];
+            let available = entries.len() / BILLBOARD_ALT_MODE_LEN;
+            // `bmConfigured` holds 2 bits per mode across 32 bytes, so it can
+            // describe at most 128 modes — the hard bound on the index used
+            // to read it below.
+            let take = (declared as usize)
+                .min(available)
+                .min(BILLBOARD_BM_CONFIGURED_LEN * 4);
+            let alt_modes = (0..take)
+                .map(|i| {
+                    let o = i * BILLBOARD_ALT_MODE_LEN;
+                    // Two status bits per mode, packed LSB-first.
+                    let byte = bm[i / 4];
+                    let state = AltModeState::from_bits(byte >> ((i % 4) * 2));
+                    BillboardAltMode {
+                        index: i as u8,
+                        svid: u16::from_le_bytes([entries[o], entries[o + 1]]),
+                        mode: entries[o + 2],
+                        state,
+                    }
+                })
+                .collect();
+
+            BosCapability::Billboard(BillboardCapability {
+                num_alternate_modes: declared,
+                preferred_alternate_mode: body[2],
+                vconn_power: u16::from_le_bytes([body[3], body[4]]),
+                bcd_version: u16::from_le_bytes([body[37], body[38]]),
+                additional_failure_info: failure,
+                no_usb_pd_communication: failure & (1 << 0) != 0,
+                no_battery_power: failure & (1 << 1) != 0,
+                alt_modes,
             })
         }
         other => BosCapability::Other {
@@ -1218,6 +1422,173 @@ mod tests {
         let b = parse(&blob).expect("valid header");
         assert_eq!(b.container_id(), Some([0u8; 16]));
         assert_eq!(b.container_id_string(), None);
+    }
+
+    // ---- billboard ------------------------------------------------------
+
+    /// Build a spec-shaped Billboard capability descriptor.
+    ///
+    /// Synthetic on purpose: this development box has no USB-C alt-mode
+    /// hardware, so the layout is constructed from the *USB Device Class
+    /// Definition for Billboard Devices* rather than captured live.
+    fn billboard_descriptor(modes: &[(u16, u8, u8)], failure_info: u8) -> Vec<u8> {
+        let mut d = Vec::new();
+        let total = BILLBOARD_FIXED_LEN + modes.len() * BILLBOARD_ALT_MODE_LEN;
+        d.push(total as u8); // bLength
+        d.push(DT_DEVICE_CAPABILITY); // bDescriptorType
+        d.push(CAP_BILLBOARD); // bDevCapabilityType
+        d.push(0x07); // iAdditionalInfoURL
+        d.push(modes.len() as u8); // bNumberOfAlternateOrUSB4Modes
+        d.push(0x00); // bPreferredAlternateOrUSB4Mode
+        d.extend_from_slice(&0u16.to_le_bytes()); // VCONN Power
+
+        // bmConfigured — 2 status bits per mode, packed LSB-first.
+        let mut bm = [0u8; BILLBOARD_BM_CONFIGURED_LEN];
+        for (i, (_, _, state)) in modes.iter().enumerate() {
+            bm[i / 4] |= (state & 0x3) << ((i % 4) * 2);
+        }
+        d.extend_from_slice(&bm);
+
+        d.extend_from_slice(&0x0121u16.to_le_bytes()); // bcdVersion 1.21
+        d.push(failure_info); // bAdditionalFailureInfo
+        d.push(0x00); // bReserved
+
+        for (svid, mode, _) in modes {
+            d.extend_from_slice(&svid.to_le_bytes());
+            d.push(*mode);
+            d.push(0x00); // iAlternateOrUSB4ModeString
+        }
+        assert_eq!(d.len(), total);
+        d
+    }
+
+    fn bos_around(caps: &[Vec<u8>]) -> Vec<u8> {
+        let total = BOS_HEADER_LEN + caps.iter().map(Vec::len).sum::<usize>();
+        let mut blob = vec![BOS_HEADER_LEN as u8, DT_BOS];
+        blob.extend_from_slice(&(total as u16).to_le_bytes());
+        blob.push(caps.len() as u8);
+        for c in caps {
+            blob.extend_from_slice(c);
+        }
+        blob
+    }
+
+    #[test]
+    fn parses_billboard_dp_altmode_not_attempted() {
+        // DisplayPort (SVID 0xFF01), mode 0, state 0b01 = NotAttempted,
+        // with bAdditionalFailureInfo bit 0 = no USB-PD communication.
+        let cap = billboard_descriptor(&[(0xFF01, 0, 1)], 0b01);
+        let b = parse(&bos_around(&[cap])).expect("valid BOS");
+        assert!(!b.truncated);
+
+        let bb = b.billboard().expect("billboard cap");
+        assert_eq!(bb.num_alternate_modes, 1);
+        assert_eq!(bb.bcd_version, 0x0121);
+        assert!(bb.no_usb_pd_communication);
+        assert!(!bb.no_battery_power);
+        assert_eq!(bb.failure_reasons(), vec!["no_usb_pd"]);
+        assert_eq!(bb.alt_modes.len(), 1);
+
+        let m = bb.alt_modes[0];
+        assert_eq!(m.index, 0);
+        assert_eq!(m.svid, 0xFF01);
+        assert_eq!(m.mode, 0);
+        assert_eq!(m.state, AltModeState::NotAttempted);
+        assert_eq!(m.svid_name(), Some("DisplayPort"));
+
+        assert!(!bb.any_mode_active());
+        assert_eq!(bb.overall_state(), Some(AltModeState::NotAttempted));
+        // A Billboard capability carries no data rate.
+        assert_eq!(b.max_capable_mbps(), 0);
+    }
+
+    #[test]
+    fn billboard_unpacks_two_status_bits_per_mode() {
+        // Four modes in one bmConfigured byte, one of each state.
+        let cap = billboard_descriptor(
+            &[
+                (0xFF01, 0, 0), // UnspecifiedError
+                (0xFF01, 1, 1), // NotAttempted
+                (0x8087, 0, 2), // Unsuccessful
+                (0x1234, 3, 3), // Successful
+            ],
+            0b10,
+        );
+        let b = parse(&bos_around(&[cap])).unwrap();
+        let bb = b.billboard().unwrap();
+        assert_eq!(bb.alt_modes.len(), 4);
+        assert_eq!(bb.alt_modes[0].state, AltModeState::UnspecifiedError);
+        assert_eq!(bb.alt_modes[1].state, AltModeState::NotAttempted);
+        assert_eq!(bb.alt_modes[2].state, AltModeState::Unsuccessful);
+        assert_eq!(bb.alt_modes[3].state, AltModeState::Successful);
+        assert_eq!(bb.alt_modes[2].svid_name(), Some("Thunderbolt"));
+        assert_eq!(bb.alt_modes[3].svid_name(), None);
+        assert_eq!(bb.alt_modes[3].mode, 3);
+
+        assert!(bb.any_mode_active());
+        assert_eq!(bb.overall_state(), Some(AltModeState::Successful));
+        assert!(!bb.no_usb_pd_communication);
+        assert!(bb.no_battery_power);
+        assert_eq!(bb.failure_reasons(), vec!["no_battery"]);
+    }
+
+    #[test]
+    fn billboard_with_no_modes_has_no_overall_state() {
+        let cap = billboard_descriptor(&[], 0);
+        let b = parse(&bos_around(&[cap])).unwrap();
+        let bb = b.billboard().unwrap();
+        assert!(bb.alt_modes.is_empty());
+        assert_eq!(bb.overall_state(), None);
+        assert!(bb.failure_reasons().is_empty());
+    }
+
+    #[test]
+    fn billboard_truncated_mode_array_keeps_whole_entries() {
+        let mut cap = billboard_descriptor(&[(0xFF01, 0, 3), (0x8087, 0, 3)], 0);
+        // Drop the second entry's payload but leave bLength/count claiming 2.
+        cap.truncate(cap.len() - BILLBOARD_ALT_MODE_LEN);
+        cap[0] = cap.len() as u8;
+        let b = parse(&bos_around(&[cap])).unwrap();
+        let bb = b.billboard().unwrap();
+        assert_eq!(bb.num_alternate_modes, 2);
+        assert_eq!(bb.alt_modes.len(), 1);
+    }
+
+    #[test]
+    fn undersized_billboard_falls_back_to_other() {
+        let mut cap = billboard_descriptor(&[(0xFF01, 0, 1)], 0);
+        cap.truncate(20);
+        cap[0] = 20;
+        let b = parse(&bos_around(&[cap])).unwrap();
+        assert!(b.billboard().is_none());
+        assert_eq!(b.capabilities[0].cap_type(), CAP_BILLBOARD);
+        assert!(matches!(
+            b.capabilities[0],
+            BosCapability::Other { cap_type: 0x0d, .. }
+        ));
+    }
+
+    #[test]
+    fn billboard_alt_mode_states_have_stable_labels() {
+        assert_eq!(AltModeState::UnspecifiedError.label(), "UnspecifiedError");
+        assert_eq!(AltModeState::NotAttempted.label(), "NotAttempted");
+        assert_eq!(AltModeState::Unsuccessful.label(), "Unsuccessful");
+        assert_eq!(AltModeState::Successful.label(), "Successful");
+    }
+
+    #[test]
+    fn billboard_coexists_with_speed_capabilities() {
+        // A dock publishes both; neither should shadow the other.
+        let ss = vec![0x0a, 0x10, 0x03, 0x02, 0x0e, 0x00, 0x02, 0x0a, 0xff, 0x07];
+        let bb = billboard_descriptor(&[(0xFF01, 0, 2)], 0b01);
+        let b = parse(&bos_around(&[ss, bb])).unwrap();
+        assert_eq!(b.capabilities.len(), 2);
+        assert_eq!(b.max_capable_mbps(), 5_000);
+        assert_eq!(b.functional_floor_mbps(), Some(480));
+        assert_eq!(
+            b.billboard().unwrap().overall_state(),
+            Some(AltModeState::Unsuccessful)
+        );
     }
 
     // ---- assessment -----------------------------------------------------

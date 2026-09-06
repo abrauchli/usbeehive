@@ -32,6 +32,18 @@ fn property_label(key: &str) -> String {
         "charger_max" => "Charger max".into(),
         "usb_max_power_ma" => "Max bus power (mA)".into(),
         "usb_device" => "USB device".into(),
+        // Capability (BOS) keys — see `crate::bos`.
+        "usb_capable_speed" => "Device capable of".into(),
+        "usb_capable_speed_mbps" => "Device capable of (Mbps)".into(),
+        "usb_capable_gen" => "Device generation".into(),
+        "usb_capable_rx_lanes" => "Capable RX lanes".into(),
+        "usb_capable_tx_lanes" => "Capable TX lanes".into(),
+        "usb_functional_floor_mbps" => "Needs at least (Mbps)".into(),
+        "usb_link_verdict" => "Link vs capability".into(),
+        "usb_bos_container_id" => "Container ID".into(),
+        "usb_altmode_svids" => "Alt-mode SVIDs".into(),
+        "usb_altmode_state" => "Alt-mode state".into(),
+        "usb_altmode_failure" => "Alt-mode failure".into(),
         other => other.into(),
     }
 }
@@ -54,6 +66,11 @@ fn property_flag_label(key: &str) -> Option<&'static str> {
         "cable.trust.reserved_bits" => "Cable trust: reserved bits set",
         // A hint, not a trust warning — renders in the normal style.
         "cable.no_emarker" => "No cable e-marker visible (3A limit may apply)",
+        // The device is linked below the speed its own descriptors say it
+        // needs — the app's other headline use case, alongside slow cables.
+        "usb_link_degraded" => "Linked below this device's own requirement",
+        // Not a fault: the kernel simply never read this device's BOS.
+        "usb_bos_suppressed" => "Capability unknown (kernel suppresses BOS for this device)",
         _ => return None,
     })
 }
@@ -65,7 +82,7 @@ fn write_property<W: Write>(w: &mut W, key: &str, value: &str) -> io::Result<()>
         if value == "true" {
             // Cable-trust flags are warnings; colour them yellow so they
             // stand out against the routine transport / link bullets.
-            let color = if key.starts_with("cable.trust.") {
+            let color = if key.starts_with("cable.trust.") || key == "usb_link_degraded" {
                 YELLOW
             } else {
                 ""

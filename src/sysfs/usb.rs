@@ -113,10 +113,13 @@ fn from_sysfs(path: &Path, name: &str) -> Option<UsbDevice> {
         is_root_hub: name.starts_with("usb"),
 
         // Optional by design: USB 2.0-only devices publish no BOS and the
-        // kernel does not create the attribute. Absence is never an error.
+        // kernel does not create the attribute. Absence is never an error —
+        // and when `USB_QUIRK_NO_BOS` is set it does not even imply the
+        // device lacks the capability (see `UsbDevice::data_rate`).
         bos: reader::read_bytes(path.join("bos_descriptors"))
             .as_deref()
             .and_then(crate::bos::parse),
+        quirks: reader::read_hex(path.join("quirks")).unwrap_or(0),
 
         interfaces: read_interfaces(path),
         children: Vec::new(),

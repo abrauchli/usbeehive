@@ -232,6 +232,41 @@ fn emit_signals(
             eprintln!("usbeehived: capability_restored emit failed: {e}");
         }
     }
+
+    // Data-rate warnings are keyed on the summary id, not a port number —
+    // the device is typically a plain USB device behind a hub.
+    for id in &diff.newly_rate_degraded {
+        let (summary, detail) = {
+            let guard = state.lock().expect("state mutex poisoned");
+            guard
+                .manager
+                .devices()
+                .iter()
+                .find(|s| &s.id() == id)
+                .and_then(|s| {
+                    s.data_rate
+                        .as_ref()
+                        .map(|d| (d.summary.clone(), d.detail.clone()))
+                })
+                .unwrap_or_default()
+        };
+        eprintln!("usbeehived: ! {id} data rate degraded — {summary}");
+        if let Err(e) = block_on(DevicesIface::data_rate_degraded(
+            emitter,
+            id.clone(),
+            summary,
+            detail,
+        )) {
+            eprintln!("usbeehived: data_rate_degraded emit failed: {e}");
+        }
+    }
+
+    for id in &diff.rate_restored {
+        eprintln!("usbeehived: ✓ {id} data rate restored");
+        if let Err(e) = block_on(DevicesIface::data_rate_restored(emitter, id.clone())) {
+            eprintln!("usbeehived: data_rate_restored emit failed: {e}");
+        }
+    }
 }
 
 fn user_unit_dir() -> Result<PathBuf, String> {

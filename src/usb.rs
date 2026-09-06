@@ -96,17 +96,48 @@ pub struct UsbDevice {
     #[serde(default)]
     pub bos: Option<crate::bos::BosDescriptors>,
 
+    /// Kernel per-device quirk bitmask (sysfs `quirks`, hex). Zero when the
+    /// attribute is absent or no quirk applies. See [`USB_QUIRK_NO_BOS`].
+    #[serde(default)]
+    pub quirks: u32,
+
     /// Every regular file in the device's sysfs directory, captured for
     /// `--raw` rendering. Optional: backends may leave this empty.
     pub raw_attributes: BTreeMap<String, String>,
 }
 
+/// `USB_QUIRK_NO_BOS` — `BIT(17)` in `include/linux/usb/quirks.h`.
+///
+/// When the kernel applies this quirk it never reads the device's Binary
+/// Object Store, so `bos_descriptors` is absent **regardless of what the
+/// device can actually do**. A missing BOS therefore means "unknown", not
+/// "USB 2.0 only", whenever this bit is set.
+pub const USB_QUIRK_NO_BOS: u32 = 1 << 17;
+
+/// `USB_QUIRK_NO_LPM` — `BIT(10)` in `include/linux/usb/quirks.h`. Present
+/// for completeness; it does not affect BOS visibility.
+pub const USB_QUIRK_NO_LPM: u32 = 1 << 10;
+
 impl UsbDevice {
+    /// `true` when the kernel is deliberately suppressing this device's BOS
+    /// (`USB_QUIRK_NO_BOS`).
+    ///
+    /// Callers MUST NOT infer "USB 2.0 only" — or any capability shortfall —
+    /// from a missing [`Self::bos`] while this is `true`. The device's
+    /// capability is simply unknown.
+    pub fn bos_suppressed_by_quirk(&self) -> bool {
+        self.quirks & USB_QUIRK_NO_BOS != 0
+    }
+
     /// Compare the negotiated link speed against the device's advertised
     /// capability, if it published a BOS.
     ///
-    /// `None` when the device publishes no BOS — which is normal and must
-    /// never be rendered as a fault.
+    /// `None` when the device publishes no BOS — which is normal (USB
+    /// 2.0-only devices have none) and must never be rendered as a fault.
+    /// It is also `None`, for a different reason, when the kernel suppressed
+    /// the BOS via `USB_QUIRK_NO_BOS`; use [`Self::bos_suppressed_by_quirk`]
+    /// to tell the two apart. Either way no verdict is produced, so a
+    /// quirked device can never be reported as degraded.
     pub fn data_rate(&self) -> Option<crate::bos::DataRateAssessment> {
         self.bos
             .as_ref()
