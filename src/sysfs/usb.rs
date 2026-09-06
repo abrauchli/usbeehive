@@ -70,6 +70,115 @@ fn read_interfaces(dev_path: &Path) -> Vec<UsbInterface> {
     out
 }
 
+/// Port states that mean "a device is sitting here". `powered`,
+/// `reconnecting`, `unauthenticated` and friends are transient or empty, and
+/// `not attached` is the idle case.
+const OCCUPIED_PORT_STATES: [&str; 2] = ["configured", "suspended"];
+
+/// The physical-connector view of a device: which hub port it hangs off,
+/// that port's connector type, and — for a root-hub port — the companion
+/// port of the *other* speed half of the same receptacle.
+#[derive(Default)]
+struct PortView {
+    id: String,
+    peer_id: String,
+    peer_state: String,
+    connect_type: String,
+}
+
+fn link_basename(link: &Path) -> String {
+    link.file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// Resolve `<dev>/port`, then `<port>/peer`.
+///
+/// Both are relative symlinks (`../5-0:1.0/usb5-port2`,
+/// `../../../usb6/6-0:1.0/usb6-port2`). We deliberately *join* rather than
+/// canonicalize: the kernel resolves the `..` components against the real
+/// device directory at open() time, which is exactly what we want, and it
+/// keeps the injectable-root design working for fixtures.
+fn read_port_view(dev_path: &Path) -> PortView {
+    let mut view = PortView::default();
+    let Ok(port_link) = fs::read_link(dev_path.join("port")) else {
+        return view;
+    };
+    view.id = link_basename(&port_link);
+    let port_dir = dev_path.join(&port_link);
+
+    // The kernel writes the literal "unknown" on every hub-internal port.
+    // Emitting that would put a useless value on most devices; absence
+    // already means "unknown" throughout this crate's key vocabulary.
+    view.connect_type = reader::read_attr(port_dir.join("connect_type"))
+        .filter(|s| s != "unknown")
+        .unwrap_or_default();
+
+    if let Ok(peer_link) = fs::read_link(port_dir.join("peer")) {
+        view.peer_id = link_basename(&peer_link);
+        view.peer_state =
+            reader::read_attr(port_dir.join(&peer_link).join("state")).unwrap_or_default();
+    }
+    view
+}
+
+/// Count this hub's occupied downstream ports.
+///
+/// The port objects are children of the hub's *interface* directory
+/// (`5-2/5-2:1.0/5-2-port1`, `usb5/5-0:1.0/usb5-port2`), not of the device
+/// directory itself. `None` when no port object was readable — which is not
+/// the same statement as "zero ports in use".
+fn count_ports_used(dev_path: &Path) -> Option<u32> {
+    let mut seen = false;
+    let mut used = 0;
+    for iface in reader::subdirs(dev_path) {
+        if !iface
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().contains(':'))
+        {
+            continue;
+        }
+        for port in reader::subdirs(&iface) {
+            if !port
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().contains("-port"))
+            {
+                continue;
+            }
+            let Some(state) = reader::read_attr(port.join("state")) else {
+                continue;
+            };
+            seen = true;
+            if OCCUPIED_PORT_STATES.contains(&state.as_str()) {
+                used += 1;
+            }
+        }
+    }
+    seen.then_some(used)
+}
+
+/// Model name from the udev hardware database (`ID_MODEL_FROM_DATABASE`).
+///
+/// Only available when the `watch` feature brings in the `udev` crate; every
+/// other build simply omits the name, which callers already treat as "not
+/// looked up". Never fails loudly: a missing udev database, a fixture root,
+/// or a device with no hwdb match all yield an empty string.
+#[cfg(feature = "watch")]
+fn read_product_db(path: &Path) -> String {
+    udev::Device::from_syspath(path)
+        .ok()
+        .and_then(|d| {
+            d.property_value("ID_MODEL_FROM_DATABASE")
+                .map(|v| v.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(not(feature = "watch"))]
+fn read_product_db(_path: &Path) -> String {
+    String::new()
+}
+
 fn from_sysfs(path: &Path, name: &str) -> Option<UsbDevice> {
     if name.contains(':') {
         return None;
@@ -78,6 +187,8 @@ fn from_sysfs(path: &Path, name: &str) -> Option<UsbDevice> {
     let pid = reader::read_hex(path.join("idProduct"))?;
 
     let device_class = reader::read_hex(path.join("bDeviceClass")).unwrap_or(0) as u8;
+    let is_hub = device_class == 0x09;
+    let port = read_port_view(path);
 
     let dev = UsbDevice {
         sysfs_path: path.to_path_buf(),
@@ -109,8 +220,29 @@ fn from_sysfs(path: &Path, name: &str) -> Option<UsbDevice> {
         device_sub_class: reader::read_hex(path.join("bDeviceSubClass")).unwrap_or(0) as u8,
         device_protocol: reader::read_hex(path.join("bDeviceProtocol")).unwrap_or(0) as u8,
 
-        is_hub: device_class == 0x09,
+        is_hub,
         is_root_hub: name.starts_with("usb"),
+
+        // Physical connector view. `port_peer_state` is the key that makes a
+        // BOS capability shortfall actionable: a SuperSpeed-capable device
+        // linked at 480 Mbps whose companion port reads `not attached` never
+        // trained its SuperSpeed lanes.
+        port_id: port.id,
+        port_peer_id: port.peer_id,
+        port_peer_state: port.peer_state,
+        port_connect_type: port.connect_type,
+        max_child: if is_hub {
+            reader::read_int(path.join("maxchild")).unwrap_or(0).max(0) as u32
+        } else {
+            0
+        },
+        ports_used: if is_hub { count_ports_used(path) } else { None },
+
+        // Config `bmAttributes` — bit 6 self-powered, bit 5 remote wakeup.
+        // Without it `bMaxPower` cannot be read as a bus-power commitment.
+        bm_attributes: reader::read_hex(path.join("bmAttributes")).unwrap_or(0),
+
+        product_db: read_product_db(path),
 
         // Optional by design: USB 2.0-only devices publish no BOS and the
         // kernel does not create the attribute. Absence is never an error —

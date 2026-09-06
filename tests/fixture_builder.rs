@@ -133,6 +133,81 @@ impl<'a> UsbDeviceFixture<'a> {
     }
 }
 
+/// Write the `bmAttributes` config-descriptor byte for an already-written USB
+/// device. Bit 6 = self-powered, bit 5 = remote wakeup, bit 7 reserved-set —
+/// so `0xa0` is bus-powered + wakeup and `0xe0` is self-powered + wakeup.
+pub fn write_bm_attributes(root: &Path, bus_port: &str, value: u8) {
+    let dir = root.join("bus/usb/devices").join(bus_port);
+    fs::create_dir_all(&dir).unwrap();
+    write_attr(&dir, "bmAttributes", &format!("{value:02x}"));
+}
+
+/// Write the `quirks` bitmask for an already-written USB device, the way the
+/// kernel does (bare lowercase hex, no `0x` prefix).
+pub fn write_quirks(root: &Path, bus_port: &str, value: u32) {
+    let dir = root.join("bus/usb/devices").join(bus_port);
+    fs::create_dir_all(&dir).unwrap();
+    write_attr(&dir, "quirks", &format!("{value:x}"));
+}
+
+/// Create one downstream port object for a hub, the way the kernel does:
+/// the port directory is a child of the hub's **interface 0** directory, not
+/// of the hub device directory (`5-2/5-2:1.0/5-2-port1`,
+/// `usb5/5-0:1.0/usb5-port2`).
+///
+/// Returns the port directory so callers can add `peer` links to it.
+///
+/// `hub_bus_port` is the hub's own sysfs name; `iface` is the interface
+/// directory basename (real kernels use `5-2:1.0` for a normal hub and
+/// `5-0:1.0` for root hub `usb5`); `port_name` is the full port object name.
+pub fn write_hub_port(
+    root: &Path,
+    hub_bus_port: &str,
+    iface: &str,
+    port_name: &str,
+    state: &str,
+    connect_type: &str,
+) -> PathBuf {
+    let dir = root
+        .join("bus/usb/devices")
+        .join(hub_bus_port)
+        .join(iface)
+        .join(port_name);
+    fs::create_dir_all(&dir).unwrap();
+    write_attr(&dir, "state", state);
+    if !connect_type.is_empty() {
+        write_attr(&dir, "connect_type", connect_type);
+    }
+    dir
+}
+
+/// Write the hub's `maxchild` attribute.
+pub fn write_maxchild(root: &Path, hub_bus_port: &str, maxchild: u32) {
+    let dir = root.join("bus/usb/devices").join(hub_bus_port);
+    fs::create_dir_all(&dir).unwrap();
+    write_attr(&dir, "maxchild", &maxchild.to_string());
+}
+
+/// Link a device to the hub port it hangs off, the way the kernel does — a
+/// relative `port` symlink from the device directory to the port object
+/// (`5-2/port -> ../5-0:1.0/usb5-port2`).
+pub fn link_device_port(root: &Path, bus_port: &str, port_dir: &Path) {
+    let dev_dir = root.join("bus/usb/devices").join(bus_port);
+    fs::create_dir_all(&dev_dir).unwrap();
+    let link = dev_dir.join("port");
+    let _ = fs::remove_file(&link);
+    std::os::unix::fs::symlink(port_dir, link).unwrap();
+}
+
+/// Link two root-hub port objects as companions of the same physical
+/// connector — the kernel's `peer` symlink, which is what tells you that the
+/// SuperSpeed half of a receptacle never trained.
+pub fn link_port_peer(port_dir: &Path, peer_dir: &Path) {
+    let link = port_dir.join("peer");
+    let _ = fs::remove_file(&link);
+    std::os::unix::fs::symlink(peer_dir, link).unwrap();
+}
+
 /// Helper: write a Type-C port directory (without partner/cable).
 pub fn write_typec_port(root: &Path, port_name: &str, fields: &[(&str, &str)]) -> PathBuf {
     let dir = root.join("class/typec").join(port_name);

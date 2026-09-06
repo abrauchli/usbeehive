@@ -101,6 +101,68 @@ pub struct UsbDevice {
     #[serde(default)]
     pub quirks: u32,
 
+    /// Basename of the hub-port object this device hangs off — the target of
+    /// the device's `port` symlink (e.g. `"usb5-port2"`, `"5-2.1-port1"`).
+    /// Empty when the kernel publishes no `port` link (root hubs, or a
+    /// backend that does not read it).
+    #[serde(default)]
+    pub port_id: String,
+
+    /// Basename of the *companion* root-hub port that shares the same
+    /// physical connector — the USB 2.0 half of a USB 3.x receptacle, or
+    /// vice versa. Target of `<port>/peer`. Empty when there is none, which
+    /// is the normal case for hub-internal ports.
+    #[serde(default)]
+    pub port_peer_id: String,
+
+    /// The companion port's `state`, verbatim from the kernel
+    /// (`"not attached"`, `"configured"`, `"suspended"`, `"powered"`, …).
+    ///
+    /// This is the *why* behind a capability shortfall: a SuperSpeed-capable
+    /// device linked at 480 Mbps whose companion port reads `not attached`
+    /// never trained its SuperSpeed lanes — a USB 2.0-only cable or
+    /// receptacle. Empty when [`Self::port_peer_id`] is empty or the
+    /// attribute is unreadable.
+    #[serde(default)]
+    pub port_peer_state: String,
+
+    /// This device's own port `connect_type`, verbatim (`"hotplug"`,
+    /// `"hardwired"`, `"not used"`). Empty when unreadable **or** when the
+    /// kernel reports the literal `"unknown"`, which it does for every
+    /// hub-internal port.
+    #[serde(default)]
+    pub port_connect_type: String,
+
+    /// `maxchild` — number of downstream ports. Zero for non-hubs and when
+    /// the attribute is unreadable.
+    #[serde(default)]
+    pub max_child: u32,
+
+    /// Downstream ports of this hub whose `state` is `configured` or
+    /// `suspended` — i.e. occupied. `None` when this is not a hub or no
+    /// port objects were readable (which is not the same as "zero used").
+    #[serde(default)]
+    pub ports_used: Option<u32>,
+
+    /// Active configuration descriptor `bmAttributes`. Bit 6 = self-powered,
+    /// bit 5 = remote wakeup, bit 7 is reserved-and-always-set — so a value
+    /// of zero means "not read", never a valid descriptor.
+    #[serde(default)]
+    pub bm_attributes: u32,
+
+    /// Model name from the udev hardware database (`ID_MODEL_FROM_DATABASE`,
+    /// which hwdb derives from the USB-IF `usb.ids` list). Empty when the
+    /// lookup missed, when the crate was built without the `watch` feature
+    /// (that is where the `udev` dependency lives), or when no udev database
+    /// is present.
+    ///
+    /// Advisory only: it frequently names the *silicon* rather than the
+    /// product (`"RTS5411 Hub"` for a device whose `iProduct` says
+    /// `"4-Port USB 2.0 Hub"`), which is a capability clue, but it can also
+    /// be stale for re-badged PIDs. Never overrides [`Self::product`].
+    #[serde(default)]
+    pub product_db: String,
+
     /// Every regular file in the device's sysfs directory, captured for
     /// `--raw` rendering. Optional: backends may leave this empty.
     pub raw_attributes: BTreeMap<String, String>,
@@ -117,6 +179,110 @@ pub const USB_QUIRK_NO_BOS: u32 = 1 << 17;
 /// `USB_QUIRK_NO_LPM` — `BIT(10)` in `include/linux/usb/quirks.h`. Present
 /// for completeness; it does not affect BOS visibility.
 pub const USB_QUIRK_NO_LPM: u32 = 1 << 10;
+
+/// `USB_QUIRK_*` bit names, index = bit position, snapshotted from
+/// `include/linux/usb/quirks.h` of Linux 7.0 (bits 0–18; the `USB_QUIRK_`
+/// prefix is stripped).
+///
+/// The kernel only ever appends here, so an older kernel is a prefix of this
+/// table and a newer one grows past it — bits beyond the end are rendered as
+/// `bit<N>` by [`quirk_names`] rather than dropped.
+const QUIRK_BIT_NAMES: [&str; 19] = [
+    "STRING_FETCH_255",
+    "RESET_RESUME",
+    "NO_SET_INTF",
+    "CONFIG_INTF_STRINGS",
+    "RESET",
+    "HONOR_BNUMINTERFACES",
+    "DELAY_INIT",
+    "LINEAR_UFRAME_INTR_BINTERVAL",
+    "DEVICE_QUALIFIER",
+    "IGNORE_REMOTE_WAKEUP",
+    "NO_LPM",
+    "LINEAR_FRAME_INTR_BINTERVAL",
+    "DISCONNECT_SUSPEND",
+    "DELAY_CTRL_MSG",
+    "HUB_SLOW_RESET",
+    "ENDPOINT_IGNORE",
+    "SHORT_SET_ADDRESS_REQ_TIMEOUT",
+    "NO_BOS",
+    "FORCE_ONE_CONFIG",
+];
+
+/// Decode a kernel quirk bitmask into names, in ascending bit order.
+///
+/// Bits this build does not know are rendered `bit<N>` so a newer kernel's
+/// quirks are still reported rather than silently dropped. An empty result
+/// means the kernel applied no workaround to the device.
+///
+/// ```
+/// use usbeehive::usb::quirk_names;
+///
+/// assert!(quirk_names(0).is_empty());
+/// assert_eq!(quirk_names(0x400), vec!["NO_LPM".to_string()]);
+/// assert_eq!(quirk_names(1 << 31), vec!["bit31".to_string()]);
+/// ```
+pub fn quirk_names(quirks: u32) -> Vec<String> {
+    (0..u32::BITS)
+        .filter(|bit| quirks & (1 << bit) != 0)
+        .map(|bit| match QUIRK_BIT_NAMES.get(bit as usize) {
+            Some(name) => (*name).to_string(),
+            None => format!("bit{bit}"),
+        })
+        .collect()
+}
+
+impl UsbDevice {
+    /// Names of the kernel quirks applied to this device, ascending by bit.
+    /// Empty when the kernel applied none — see [`quirk_names`].
+    pub fn quirk_names(&self) -> Vec<String> {
+        quirk_names(self.quirks)
+    }
+
+    /// `true` when the active configuration declares itself **self-powered**
+    /// (`bmAttributes` bit 6), `false` when it declares itself bus-powered.
+    ///
+    /// `None` when `bmAttributes` was not read — bit 7 is reserved and
+    /// always set in a valid descriptor, so zero can only mean "absent".
+    pub fn self_powered(&self) -> Option<bool> {
+        if self.bm_attributes == 0 {
+            return None;
+        }
+        Some(self.bm_attributes & 0x40 != 0)
+    }
+
+    /// Current this hub can offer downstream, in mA, when it is bus-powered:
+    /// 500 mA on a USB 2.0 link, 900 mA on a SuperSpeed one.
+    ///
+    /// `None` for non-hubs, for self-powered hubs (which draw from their own
+    /// supply and have no bus-derived ceiling worth quoting), and when
+    /// `bmAttributes` was not read.
+    pub fn hub_power_budget_ma(&self) -> Option<u32> {
+        if !self.is_hub || self.self_powered()? {
+            return None;
+        }
+        Some(if self.speed >= 5000 { 900 } else { 500 })
+    }
+
+    /// Sum of the `bMaxPower` **declared** by this hub's direct children,
+    /// counting self-powered children as zero (they draw from their own
+    /// supply, not from this hub's budget).
+    ///
+    /// `None` when the hub has no enumerated children. This is a declared
+    /// maximum, not a measured draw — never word it as "draws".
+    pub fn hub_power_committed_ma(&self) -> Option<u32> {
+        if self.children.is_empty() {
+            return None;
+        }
+        Some(
+            self.children
+                .iter()
+                .filter(|c| c.self_powered() != Some(true))
+                .map(|c| c.max_power_ma)
+                .sum(),
+        )
+    }
+}
 
 impl UsbDevice {
     /// `true` when the kernel is deliberately suppressing this device's BOS
@@ -372,6 +538,89 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(d.power_label().as_deref(), Some("1.5 W"));
+    }
+
+    #[test]
+    fn quirk_names_are_ascending_and_prefix_stripped() {
+        assert!(quirk_names(0).is_empty());
+        // 0x400 is the live value on this project's reference RTL8153.
+        assert_eq!(quirk_names(USB_QUIRK_NO_LPM), vec!["NO_LPM"]);
+        assert_eq!(quirk_names(USB_QUIRK_NO_BOS), vec!["NO_BOS"]);
+        assert_eq!(
+            quirk_names(USB_QUIRK_NO_BOS | (1 << 1) | USB_QUIRK_NO_LPM),
+            vec!["RESET_RESUME", "NO_LPM", "NO_BOS"]
+        );
+    }
+
+    #[test]
+    fn quirk_names_render_unknown_bits_rather_than_dropping_them() {
+        // Bit 19 does not exist in the 7.0 header snapshot; a newer kernel
+        // must still be reported, not silently swallowed.
+        assert_eq!(quirk_names(1 << 19), vec!["bit19"]);
+        assert_eq!(quirk_names(1 << 31), vec!["bit31"]);
+        assert_eq!(
+            quirk_names(USB_QUIRK_NO_BOS | (1 << 19)),
+            ["NO_BOS", "bit19"]
+        );
+    }
+
+    #[test]
+    fn self_powered_reads_bmattributes_bit6() {
+        let mk = |bm: u32| UsbDevice {
+            bm_attributes: bm,
+            ..Default::default()
+        };
+        // Live values from the reference machine.
+        assert_eq!(mk(0xe0).self_powered(), Some(true)); // 3-6, 5-2
+        assert_eq!(mk(0xc0).self_powered(), Some(true)); // 5-2.1.2
+        assert_eq!(mk(0xa0).self_powered(), Some(false)); // 5-2.4
+        assert_eq!(mk(0x80).self_powered(), Some(false)); // 3-5
+        assert_eq!(mk(0).self_powered(), None); // attribute absent
+    }
+
+    #[test]
+    fn hub_power_budget_only_for_bus_powered_hubs() {
+        let mk = |is_hub: bool, bm: u32, speed: u32| UsbDevice {
+            is_hub,
+            bm_attributes: bm,
+            speed,
+            ..Default::default()
+        };
+        assert_eq!(mk(true, 0xa0, 12).hub_power_budget_ma(), Some(500));
+        assert_eq!(mk(true, 0xa0, 5000).hub_power_budget_ma(), Some(900));
+        // Self-powered hub: no bus-derived ceiling worth quoting.
+        assert_eq!(mk(true, 0xe0, 480).hub_power_budget_ma(), None);
+        // Not a hub, and unread bmAttributes.
+        assert_eq!(mk(false, 0xa0, 480).hub_power_budget_ma(), None);
+        assert_eq!(mk(true, 0, 480).hub_power_budget_ma(), None);
+    }
+
+    #[test]
+    fn hub_power_committed_sums_bus_powered_children_only() {
+        let child = |ma: u32, bm: u32| UsbDevice {
+            max_power_ma: ma,
+            bm_attributes: bm,
+            ..Default::default()
+        };
+        let mut hub = UsbDevice {
+            is_hub: true,
+            bm_attributes: 0xa0,
+            ..Default::default()
+        };
+        assert_eq!(hub.hub_power_committed_ma(), None);
+
+        // Reference machine's 5-2.4: keyboard 90 mA + mouse 98 mA.
+        hub.children = vec![child(90, 0xa0), child(98, 0xa0)];
+        assert_eq!(hub.hub_power_committed_ma(), Some(188));
+
+        // A self-powered child draws from its own supply, not this budget.
+        hub.children.push(child(500, 0xe0));
+        assert_eq!(hub.hub_power_committed_ma(), Some(188));
+
+        // A child whose bmAttributes could not be read is counted — the
+        // conservative direction for a budget.
+        hub.children.push(child(100, 0));
+        assert_eq!(hub.hub_power_committed_ma(), Some(288));
     }
 
     #[test]
