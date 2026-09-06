@@ -48,6 +48,7 @@
 #![warn(missing_docs)]
 #![deny(unsafe_code)]
 
+pub mod bos;
 pub mod cable;
 pub mod diagnostic;
 pub mod pd;
@@ -65,6 +66,7 @@ pub mod sysfs;
 #[cfg(feature = "watch")]
 pub mod watch;
 
+pub use bos::{BosCapability, BosDescriptors, DataRateAssessment, DataRateVerdict};
 pub use cable::CableInfo;
 pub use diagnostic::{Bottleneck, ChargingDiagnostic};
 pub use power::{PdoType, PowerDataObject, PowerDeliveryPort};
