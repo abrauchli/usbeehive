@@ -189,6 +189,34 @@ impl Snapshot {
     }
 }
 
+/// Property keys — besides the whole `transport.*` family — whose value is
+/// part of the curated state fingerprint.
+///
+/// The bar for membership is: **static for the life of a connection, or a
+/// transition a consumer genuinely wants to re-snapshot on.** Anything that
+/// can move while the user is not touching the machine would turn
+/// `DeviceChanged` into a poll-rate heartbeat.
+///
+/// - `port.peer_state` earns its place: a companion port training late (or
+///   dropping) is precisely the "the SuperSpeed lanes came up / went away"
+///   transition that makes a BOS capability verdict actionable.
+/// - `power.source` and `kernel.quirks` are static per connection; including
+///   them costs nothing and catches a re-configuration.
+/// - Deliberately **excluded**: `hub.ports_used` and
+///   `hub.power_committed_ma`. They move only on plug/unplug, which already
+///   fires `DeviceAdded` / `DeviceRemoved`; fingerprinting them would add a
+///   redundant `DeviceChanged` on the hub for every such event.
+/// - Also excluded: `port.id`, `port.peer_id`, `port.connect_type`,
+///   `hub.ports_total`, `hub.power_budget_ma`, `product_db` — static, and a
+///   change to any of them implies a re-enumeration under a new id anyway.
+const FINGERPRINTED_PROPERTY_KEYS: [&str; 5] = [
+    "data_role",
+    "usb_link_verdict",
+    "port.peer_state",
+    "power.source",
+    "kernel.quirks",
+];
+
 /// Build a deterministic state fingerprint for [`DeviceSummary`] that covers
 /// only the curated user-visible fields. Raw power magnitudes (`power_in_mw`,
 /// `power_out_mw`, `contract_mw`) and raw-magnitude properties (`pd_contract`,
@@ -208,7 +236,9 @@ fn state_fingerprint(s: &crate::summary::DeviceSummary) -> String {
     let mut curated_props: Vec<(&str, &str)> = s
         .properties
         .iter()
-        .filter(|(k, _)| k == "data_role" || k == "usb_link_verdict" || k.starts_with("transport."))
+        .filter(|(k, _)| {
+            FINGERPRINTED_PROPERTY_KEYS.contains(&k.as_str()) || k.starts_with("transport.")
+        })
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
     curated_props.sort_by_key(|(k, _)| *k);

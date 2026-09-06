@@ -44,6 +44,20 @@ fn property_label(key: &str) -> String {
         "usb_altmode_svids" => "Alt-mode SVIDs".into(),
         "usb_altmode_state" => "Alt-mode state".into(),
         "usb_altmode_failure" => "Alt-mode failure".into(),
+        // Physical connector / port.
+        "port.id" => "Port".into(),
+        "port.peer_id" => "Companion port".into(),
+        "port.peer_state" => "Companion port state".into(),
+        "port.connect_type" => "Connector".into(),
+        "hub.ports_total" => "Hub ports".into(),
+        "hub.ports_used" => "Hub ports in use".into(),
+        // Power source / budget. Declared maxima, never measured draw.
+        "power.source" => "Powered by".into(),
+        "hub.power_budget_ma" => "Hub budget (mA)".into(),
+        "hub.power_committed_ma" => "Hub committed (mA)".into(),
+        // Kernel workarounds and hardware-database name.
+        "kernel.quirks" => "Kernel workaround".into(),
+        "product_db" => "Model (USB database)".into(),
         other => other.into(),
     }
 }

@@ -662,6 +662,172 @@ mod dbus_tests {
     }
 
     #[test]
+    fn connector_and_power_keys_ride_the_properties_bag_not_the_tuple_shape() {
+        let root = TempRoot::new("dbus-connector-additive");
+
+        // Root hubs of both speed halves of one physical receptacle.
+        for (bp, bus, speed, ver) in [("usb5", 5u32, 480u32, "2.00"), ("usb6", 6, 10_000, "3.10")] {
+            UsbDeviceFixture {
+                bus_port: bp,
+                vendor: 0x1D6B,
+                product: 0x0002,
+                product_name: "xHCI Host Controller",
+                manufacturer: "Linux",
+                serial: "0000:2f:00.3",
+                speed_mbps: speed,
+                max_power_ma: 0,
+                version: ver,
+                device_class: 0x09,
+                bus_num: bus,
+                dev_num: 1,
+                removable: "unknown",
+                interfaces: &[InterfaceFixture {
+                    number: 0,
+                    class: 0x09,
+                    sub_class: 0,
+                    protocol: 0,
+                    driver: "hub",
+                }],
+            }
+            .write(root.path());
+        }
+        let p5 = write_hub_port(
+            root.path(),
+            "usb5",
+            "5-0:1.0",
+            "usb5-port2",
+            "configured",
+            "hotplug",
+        );
+        let p6 = write_hub_port(
+            root.path(),
+            "usb6",
+            "6-0:1.0",
+            "usb6-port2",
+            "not attached",
+            "hotplug",
+        );
+        link_port_peer(&p5, &p6);
+
+        // A bus-powered hub on the USB 2 half, with one child behind it.
+        UsbDeviceFixture {
+            bus_port: "5-2",
+            vendor: 0x0BDA,
+            product: 0x5411,
+            product_name: "4-Port USB 2.0 Hub",
+            manufacturer: "Generic",
+            serial: "",
+            speed_mbps: 480,
+            max_power_ma: 100,
+            version: "2.10",
+            device_class: 0x09,
+            bus_num: 5,
+            dev_num: 2,
+            removable: "removable",
+            interfaces: &[InterfaceFixture {
+                number: 0,
+                class: 0x09,
+                sub_class: 0,
+                protocol: 0,
+                driver: "hub",
+            }],
+        }
+        .write(root.path());
+        link_device_port(root.path(), "5-2", &p5);
+        write_maxchild(root.path(), "5-2", 4);
+        write_bm_attributes(root.path(), "5-2", 0xa0);
+        write_quirks(root.path(), "5-2", 0x400);
+        let c1 = write_hub_port(
+            root.path(),
+            "5-2",
+            "5-2:1.0",
+            "5-2-port1",
+            "configured",
+            "unknown",
+        );
+        write_hub_port(
+            root.path(),
+            "5-2",
+            "5-2:1.0",
+            "5-2-port2",
+            "not attached",
+            "unknown",
+        );
+
+        UsbDeviceFixture {
+            bus_port: "5-2.1",
+            vendor: 0x0B95,
+            product: 0x1790,
+            product_name: "USB 10/100/1000 LAN",
+            manufacturer: "ASIX",
+            serial: "",
+            speed_mbps: 480,
+            max_power_ma: 250,
+            version: "2.10",
+            device_class: 0x00,
+            bus_num: 5,
+            dev_num: 3,
+            removable: "removable",
+            interfaces: &[],
+        }
+        .write(root.path());
+        link_device_port(root.path(), "5-2.1", &c1);
+        write_bm_attributes(root.path(), "5-2.1", 0xa0);
+
+        let state = make_state(root.path());
+        state.lock().unwrap().refresh();
+        let iface = DevicesIface { state };
+
+        let entries = iface.snapshot_entries();
+        let e = entries.iter().find(|e| e.id == "usb:5-2").expect("entry");
+        let get = |k: &str| {
+            e.properties
+                .iter()
+                .find(|(pk, _)| pk == k)
+                .map(|(_, v)| v.clone())
+        };
+
+        assert_eq!(get("port.id").as_deref(), Some("usb5-port2"));
+        assert_eq!(get("port.peer_id").as_deref(), Some("usb6-port2"));
+        assert_eq!(get("port.peer_state").as_deref(), Some("not attached"));
+        assert_eq!(get("port.connect_type").as_deref(), Some("hotplug"));
+        assert_eq!(get("hub.ports_total").as_deref(), Some("4"));
+        assert_eq!(get("hub.ports_used").as_deref(), Some("1"));
+        assert_eq!(get("power.source").as_deref(), Some("bus"));
+        assert_eq!(get("hub.power_budget_ma").as_deref(), Some("500"));
+        assert_eq!(get("hub.power_committed_ma").as_deref(), Some("250"));
+        assert_eq!(get("kernel.quirks").as_deref(), Some("NO_LPM"));
+
+        // Explicitly deferred to a later release — a client written against
+        // this cut must not find them.
+        for deferred in [
+            "pm.status",
+            "pm.autosuspend",
+            "pm.wakeup",
+            "connected_s",
+            "function.net",
+            "function.bluetooth",
+            "function.input",
+            "interface.0.name",
+            "usb.configurations",
+            "hub.multi_tt",
+            "power.remote_wakeup_capable",
+            "kernel.avoid_reset",
+            "authorized",
+            "port.disabled",
+        ] {
+            assert_eq!(get(deferred), None, "{deferred} is deferred, not shipped");
+        }
+
+        // The typed tuple fields are untouched — the interface stays Devices5.
+        assert_eq!(e.category, "Hub");
+        assert_eq!(e.link_speed_mbps, 480);
+        assert_eq!(e.usb_version, "2.1");
+        assert_eq!(e.port_number, -1);
+        assert!(!e.charging_diag.present);
+    }
+
+    #[test]
     fn dbus_constants_match_freedesktop_naming() {
         // Soft sanity guard — these strings end up in `.service` files,
         // generated D-Bus stubs in other languages, and screenshots. Catch

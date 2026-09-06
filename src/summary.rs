@@ -232,6 +232,21 @@ pub struct DeviceSummary {
     pub cable: Option<CableInfo>,
 }
 
+/// `true` when a hardware-database model name carries no information the
+/// device's own `iProduct` string does not already carry — i.e. it is equal
+/// to it, or contained in it (case-insensitively).
+///
+/// Ordinary substring containment, not tokenisation: hwdb legitimately
+/// answers just `"Hub"` for generic silicon, which is noise next to an
+/// `iProduct` of `"USB2.0 Hub"`, while `"RTS5411 Hub"` next to
+/// `"4-Port USB 2.0 Hub"` names the actual chip and is worth surfacing.
+fn adds_nothing_over_product(product_db: &str, product: &str) -> bool {
+    if product.is_empty() {
+        return false;
+    }
+    product.to_lowercase().contains(&product_db.to_lowercase())
+}
+
 fn canonical_usb_version(bcd: &str) -> String {
     // bcdUSB sysfs strings are decimal-formatted like "2.10", "3.20", "4.00".
     // The `.NN` part is *decimal subversion* in USB-IF convention, not a
@@ -716,6 +731,64 @@ impl DeviceSummary {
             if a.is_warning {
                 properties.push(("usb_link_degraded".into(), "true".into()));
             }
+        }
+
+        // Physical connector / port. `port.peer_state` is the companion of
+        // the BOS verdict above: the BOS says "this device could go faster",
+        // a peer state of `not attached` says "because the SuperSpeed lanes
+        // of this connector never trained". Keys are absent, never zero,
+        // when the kernel publishes no port object.
+        if !dev.port_id.is_empty() {
+            properties.push(("port.id".into(), dev.port_id.clone()));
+        }
+        if !dev.port_peer_id.is_empty() {
+            properties.push(("port.peer_id".into(), dev.port_peer_id.clone()));
+        }
+        if !dev.port_peer_state.is_empty() {
+            properties.push(("port.peer_state".into(), dev.port_peer_state.clone()));
+        }
+        if !dev.port_connect_type.is_empty() {
+            properties.push(("port.connect_type".into(), dev.port_connect_type.clone()));
+        }
+        if dev.is_hub {
+            if dev.max_child > 0 {
+                properties.push(("hub.ports_total".into(), dev.max_child.to_string()));
+            }
+            if let Some(used) = dev.ports_used {
+                properties.push(("hub.ports_used".into(), used.to_string()));
+            }
+        }
+
+        // Power source and, for a bus-powered hub, its downstream budget
+        // versus what its children have declared. Every figure here is a
+        // *declared* maximum from a descriptor, never a measured draw.
+        if let Some(self_powered) = dev.self_powered() {
+            properties.push((
+                "power.source".into(),
+                if self_powered { "self" } else { "bus" }.into(),
+            ));
+        }
+        if let Some(budget) = dev.hub_power_budget_ma() {
+            properties.push(("hub.power_budget_ma".into(), budget.to_string()));
+        }
+        if let Some(committed) = dev.hub_power_committed_ma() {
+            properties.push(("hub.power_committed_ma".into(), committed.to_string()));
+        }
+
+        // Kernel workarounds applied to this device, from the bitmask the
+        // BOS work already reads. Absent when the kernel applied none.
+        let quirks = dev.quirk_names();
+        if !quirks.is_empty() {
+            properties.push(("kernel.quirks".into(), quirks.join(",")));
+        }
+
+        // hwdb model name. Advisory and secondary: it never overrides the
+        // device's own `iProduct`, and is omitted when it adds nothing over
+        // it — hwdb answers "Hub" for a device whose iProduct already says
+        // "USB2.0 Hub", but "RTS5411 Hub" for one that says
+        // "4-Port USB 2.0 Hub", and only the latter is worth a key.
+        if !dev.product_db.is_empty() && !adds_nothing_over_product(&dev.product_db, &dev.product) {
+            properties.push(("product_db".into(), dev.product_db.clone()));
         }
 
         DeviceSummary {
@@ -1515,6 +1588,209 @@ mod tests {
         };
         let s = DeviceSummary::from_usb_device(&d);
         assert_eq!(s.headline, "iPhone");
+    }
+
+    /// Helper for the connector/power/quirk key tests: fetch one property.
+    fn prop<'a>(s: &'a DeviceSummary, key: &str) -> Option<&'a str> {
+        s.properties
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn port_keys_mirror_the_reference_hub_connector() {
+        // Live values for `5-2` (RTS5411): a USB 3 hub linked at 480 Mbps
+        // whose companion root-hub port never saw the SuperSpeed lanes come
+        // up. This pairing is what makes the BOS verdict actionable.
+        let d = UsbDevice {
+            bus_port: "5-2".into(),
+            speed: 480,
+            is_hub: true,
+            port_id: "usb5-port2".into(),
+            port_peer_id: "usb6-port2".into(),
+            port_peer_state: "not attached".into(),
+            port_connect_type: "hotplug".into(),
+            max_child: 4,
+            ports_used: Some(2),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(prop(&s, "port.id"), Some("usb5-port2"));
+        assert_eq!(prop(&s, "port.peer_id"), Some("usb6-port2"));
+        assert_eq!(prop(&s, "port.peer_state"), Some("not attached"));
+        assert_eq!(prop(&s, "port.connect_type"), Some("hotplug"));
+        assert_eq!(prop(&s, "hub.ports_total"), Some("4"));
+        assert_eq!(prop(&s, "hub.ports_used"), Some("2"));
+    }
+
+    #[test]
+    fn port_keys_are_absent_rather_than_empty_or_zero() {
+        // A hub-internal port has no peer and reports connect_type
+        // "unknown", which the sysfs layer already drops. Nothing may be
+        // emitted as an empty string, and a non-hub gets no hub.* key.
+        let d = UsbDevice {
+            bus_port: "5-2.4.1".into(),
+            port_id: "5-2.4-port1".into(),
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(prop(&s, "port.id"), Some("5-2.4-port1"));
+        for absent in [
+            "port.peer_id",
+            "port.peer_state",
+            "port.connect_type",
+            "hub.ports_total",
+            "hub.ports_used",
+            "power.source",
+            "kernel.quirks",
+            "product_db",
+        ] {
+            assert!(prop(&s, absent).is_none(), "{absent} must be absent");
+        }
+    }
+
+    #[test]
+    fn hub_ports_used_zero_is_emitted_but_unreadable_is_not() {
+        // `Some(0)` is a real answer ("4-port hub, nothing plugged in" —
+        // live on `3-6`); `None` means no port object was readable, which
+        // must not be flattened into "0 in use".
+        let mk = |used: Option<u32>| UsbDevice {
+            is_hub: true,
+            max_child: 4,
+            ports_used: used,
+            ..Default::default()
+        };
+        assert_eq!(
+            prop(
+                &DeviceSummary::from_usb_device(&mk(Some(0))),
+                "hub.ports_used"
+            ),
+            Some("0")
+        );
+        assert!(prop(&DeviceSummary::from_usb_device(&mk(None)), "hub.ports_used").is_none());
+    }
+
+    #[test]
+    fn power_source_and_hub_budget_track_bmattributes() {
+        // Live `5-2.4`: a bus-powered USB 1.1 keyboard hub with a 90 mA
+        // keyboard and a 98 mA mouse behind it.
+        let child = |ma: u32| UsbDevice {
+            max_power_ma: ma,
+            bm_attributes: 0xa0,
+            ..Default::default()
+        };
+        let d = UsbDevice {
+            bus_port: "5-2.4".into(),
+            speed: 12,
+            is_hub: true,
+            bm_attributes: 0xa0,
+            children: vec![child(90), child(98)],
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(prop(&s, "power.source"), Some("bus"));
+        assert_eq!(prop(&s, "hub.power_budget_ma"), Some("500"));
+        assert_eq!(prop(&s, "hub.power_committed_ma"), Some("188"));
+    }
+
+    #[test]
+    fn self_powered_hub_reports_source_but_no_budget() {
+        // Live `5-2`: self-powered, so there is no bus-derived ceiling to
+        // quote — but its one bus-powered child's commitment still is.
+        let d = UsbDevice {
+            is_hub: true,
+            bm_attributes: 0xe0,
+            children: vec![
+                UsbDevice {
+                    max_power_ma: 100,
+                    bm_attributes: 0xa0,
+                    ..Default::default()
+                },
+                UsbDevice {
+                    max_power_ma: 100,
+                    bm_attributes: 0xe0,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(prop(&s, "power.source"), Some("self"));
+        assert!(prop(&s, "hub.power_budget_ma").is_none());
+        assert_eq!(prop(&s, "hub.power_committed_ma"), Some("100"));
+    }
+
+    #[test]
+    fn kernel_quirks_render_names_not_the_bitmask() {
+        // Live `5-2.1.1` (RTL8153) reads quirks = 0x400.
+        let d = UsbDevice {
+            quirks: crate::usb::USB_QUIRK_NO_LPM,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(prop(&s, "kernel.quirks"), Some("NO_LPM"));
+
+        let d = UsbDevice {
+            quirks: crate::usb::USB_QUIRK_NO_LPM | crate::usb::USB_QUIRK_NO_BOS,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_usb_device(&d);
+        assert_eq!(prop(&s, "kernel.quirks"), Some("NO_LPM,NO_BOS"));
+    }
+
+    #[test]
+    fn product_db_only_when_it_adds_something() {
+        // Live: hwdb says "RTS5411 Hub" where iProduct says "4-Port USB 2.0
+        // Hub" — the chip name is a real capability clue, so it is emitted.
+        let d = UsbDevice {
+            product: "4-Port USB 2.0 Hub".into(),
+            product_db: "RTS5411 Hub".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            prop(&DeviceSummary::from_usb_device(&d), "product_db"),
+            Some("RTS5411 Hub")
+        );
+
+        // Live: hwdb says "AX200 Bluetooth" for a device with no iProduct.
+        let d = UsbDevice {
+            product_db: "AX200 Bluetooth".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            prop(&DeviceSummary::from_usb_device(&d), "product_db"),
+            Some("AX200 Bluetooth")
+        );
+
+        // Live: hwdb says just "Hub" where iProduct says "USB2.0 Hub" —
+        // pure noise, dropped.
+        let d = UsbDevice {
+            product: "USB2.0 Hub".into(),
+            product_db: "Hub".into(),
+            ..Default::default()
+        };
+        assert!(prop(&DeviceSummary::from_usb_device(&d), "product_db").is_none());
+
+        // Identical strings are likewise dropped.
+        let d = UsbDevice {
+            product: "Widget".into(),
+            product_db: "Widget".into(),
+            ..Default::default()
+        };
+        assert!(prop(&DeviceSummary::from_usb_device(&d), "product_db").is_none());
+    }
+
+    #[test]
+    fn adds_nothing_over_product_is_case_insensitive_containment() {
+        assert!(adds_nothing_over_product("hub", "USB2.0 Hub"));
+        assert!(adds_nothing_over_product("Widget", "Widget"));
+        assert!(!adds_nothing_over_product(
+            "RTS5411 Hub",
+            "4-Port USB 2.0 Hub"
+        ));
+        // No iProduct at all: the database name is all the user gets.
+        assert!(!adds_nothing_over_product("AX200 Bluetooth", ""));
     }
 
     #[test]

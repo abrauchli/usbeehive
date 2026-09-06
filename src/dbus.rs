@@ -42,7 +42,7 @@
 //! | 11 | `vendor_id` | `q` | `idVendor` (uint16). Zero for non-USB. |
 //! | 12 | `product_id` | `q` | `idProduct` (uint16). Zero for non-USB. |
 //! | 13 | `primary_driver` | `s` | Kernel driver bound to the device's first interface. Empty when unbound. |
-//! | 14 | `properties` | `a(ss)` | `(machine_key, value)` pairs. Adding keys is non-breaking; renaming/removing requires an interface bump. Additive keys added in 0.10.0: `usb_device` = `usb:<bus_port>` of the enumerated USB device correlated to this Type-C port via the partner's USB child node; present only on `TypeCPort` entries whose partner enumerated a USB device; adding it is non-breaking. The new JSON-only `TypeCPartner.usb_name` field (the partner's USB child dir basename) is also surfaced through `SnapshotJson` (additive, serde default-empty). Additive BOS keys (see below): `usb_capable_speed_mbps`, `usb_capable_speed`, `usb_capable_gen`, `usb_capable_rx_lanes`, `usb_capable_tx_lanes`, `usb_functional_floor_mbps`, `usb_link_verdict`, `usb_link_degraded`, `usb_bos_container_id`. |
+//! | 14 | `properties` | `a(ss)` | `(machine_key, value)` pairs. Adding keys is non-breaking; renaming/removing requires an interface bump. Additive keys added in 0.10.0: `usb_device` = `usb:<bus_port>` of the enumerated USB device correlated to this Type-C port via the partner's USB child node; present only on `TypeCPort` entries whose partner enumerated a USB device; adding it is non-breaking. The new JSON-only `TypeCPartner.usb_name` field (the partner's USB child dir basename) is also surfaced through `SnapshotJson` (additive, serde default-empty). Additive BOS keys (see below): `usb_capable_speed_mbps`, `usb_capable_speed`, `usb_capable_gen`, `usb_capable_rx_lanes`, `usb_capable_tx_lanes`, `usb_functional_floor_mbps`, `usb_link_verdict`, `usb_link_degraded`, `usb_bos_container_id`. Additive connector / power-budget / kernel keys (see below): `port.id`, `port.peer_id`, `port.peer_state`, `port.connect_type`, `hub.ports_total`, `hub.ports_used`, `power.source`, `hub.power_budget_ma`, `hub.power_committed_ma`, `kernel.quirks`, `product_db`. |
 //! | 15 | `port_number` | `i` | Type-C port number, `-1` otherwise. |
 //! | 16 | `link_speed_mbps` | `u` | Negotiated USB link speed in Mbps, `0` if unknown. |
 //! | 17 | `usb_version` | `s` | Canonical short form (`"2.0"`, `"3.2"`, `"4.0"`). Empty if unknown. |
@@ -100,6 +100,38 @@
 //! [`crate::bos::DataRateAssessment`] as `data_rate` on every summary, plus
 //! the raw decoded BOS at `usb_device.bos`. Both are additive and
 //! serde-default (`null`), matching the `TypeCPartner.usb_name` precedent.
+//!
+//! ## Physical-connector, power-source and kernel properties
+//!
+//! A second additive family, on `UsbDevice` / `Hub` entries only. Same
+//! rules: every key is optional, **absence means "unknown / not applicable",
+//! never zero**, and adding keys does not bump the interface. The full
+//! client-facing contract — value formats, when-absent semantics, live
+//! examples and display labels — is
+//! `.planning/specs/DBUS-TRIM-CONSUMER-SPEC.md`.
+//!
+//! | Key | Value | Notes |
+//! |---|---|---|
+//! | `port.id` | e.g. `"usb5-port2"`, `"5-2.1-port1"` | The hub-port object this device hangs off (`port` symlink). |
+//! | `port.peer_id` | e.g. `"usb6-port2"` | The *companion* root-hub port of the same physical receptacle — the other speed half. Absent for hub-internal ports, which have no companion. |
+//! | `port.peer_state` | kernel `state` verbatim: `"not attached"`, `"configured"`, `"suspended"`, `"powered"`, … | The companion connector half's link state. |
+//! | `port.connect_type` | `"hotplug"` \| `"hardwired"` \| `"not used"` | Emitted only when the kernel gives a real answer; the literal `"unknown"` it writes on hub-internal ports is dropped. |
+//! | `hub.ports_total` | decimal | `maxchild`. Hub entries only. |
+//! | `hub.ports_used` | decimal | Downstream ports whose `state` is `configured` or `suspended`. `"0"` is a real answer; the key is absent when no port object was readable. |
+//! | `power.source` | `"bus"` \| `"self"` | Config `bmAttributes` bit 6. Whether the device draws from the bus or its own supply. |
+//! | `hub.power_budget_ma` | decimal mA | What a **bus-powered** hub can offer downstream (500 on a USB 2 link, 900 on SuperSpeed). Absent for self-powered hubs — they have no bus-derived ceiling. |
+//! | `hub.power_committed_ma` | decimal mA | Sum of the hub's direct children's **declared** `bMaxPower`, counting self-powered children as zero. A declared maximum, never a measured draw. |
+//! | `kernel.quirks` | e.g. `"NO_LPM"`, `"RESET_RESUME,NO_BOS"` | Comma-separated `USB_QUIRK_*` names (prefix stripped), ascending by bit; bits this build does not know render as `bit<N>`. Absent when the kernel applied no workaround. |
+//! | `product_db` | e.g. `"RTS5411 Hub"` | udev hwdb model name. Advisory, never overrides the device's own `iProduct`, and omitted when it adds nothing over it. |
+//!
+//! `port.peer_state` is the actionable companion of the BOS verdict above: a
+//! device whose BOS says "SuperSpeed-capable" but which linked at 480 Mbps,
+//! sitting on a connector whose companion port reads `not attached`, never
+//! trained its SuperSpeed lanes — a USB 2.0-only cable or receptacle. It is
+//! part of the `DeviceChanged` fingerprint for exactly that reason. The
+//! occupancy and budget keys are deliberately **not** fingerprinted: they
+//! move only on plug/unplug, which already produces `DeviceAdded` /
+//! `DeviceRemoved`.
 //!
 //! # Migrating from `Devices4`
 //!
