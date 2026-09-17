@@ -244,4 +244,35 @@ mod tests {
         assert!(info.speed.is_none());
         assert_eq!(info.max_watts, 0);
     }
+
+    /// `max_watts` and `current_rating` are populated together from the Cable
+    /// VDO, so `max_watts > 0` implies `current_rating.is_some()`. The
+    /// `Bottleneck::CableNoEMarker` branch in `diagnostic.rs` sits after
+    /// `Bottleneck::CableLimit` and is only unmaskable because of that — if a
+    /// future change sets `max_watts` from another source without a rating,
+    /// this test fails before the diagnostic silently disappears.
+    #[test]
+    fn max_watts_implies_current_rating_is_set() {
+        // With a Cable VDO: both fields land together.
+        let with_vdo = TypeCCable {
+            r#type: "passive".into(),
+            plug_type: String::new(),
+            identity: Some(id(vec![3u32 << 27, 0, 0, 1u32 | (1 << 5)], 0x05AC)),
+            raw_attributes: BTreeMap::new(),
+        };
+        let info = CableInfo::from_typec_cable(&with_vdo);
+        assert!(info.max_watts > 0);
+        assert!(info.current_rating.is_some());
+
+        // Without one: neither field is set.
+        let without_vdo = TypeCCable {
+            r#type: "passive".into(),
+            plug_type: String::new(),
+            identity: Some(id(vec![3u32 << 27], 0x05AC)),
+            raw_attributes: BTreeMap::new(),
+        };
+        let info = CableInfo::from_typec_cable(&without_vdo);
+        assert_eq!(info.max_watts, 0);
+        assert!(info.current_rating.is_none());
+    }
 }

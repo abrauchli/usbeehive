@@ -106,6 +106,9 @@ impl ChargingDiagnostic {
             // rating in sight (covers cable-absent too). Phrase as "not
             // visible", never "missing" — some UCSI firmwares simply
             // don't populate cable nodes.
+            // Sitting after CableLimit is safe: cable.rs sets max_watts and
+            // current_rating together, so max_watts > 0 implies a rating is
+            // present. Pinned by cable.rs::max_watts_implies_current_rating_is_set.
             Some(ChargingDiagnostic {
                 bottleneck: Bottleneck::CableNoEMarker,
                 summary: "Cable may be limiting current to 3A".into(),
