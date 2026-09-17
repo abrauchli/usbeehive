@@ -1154,6 +1154,20 @@ impl DeviceSummary {
                 // pin the contract at the spec's 3A default. Soft hint —
                 // some UCSI firmwares never populate cable nodes at all,
                 // so this means "not visible", never "missing".
+                //
+                // Which is exactly why the absent rating cannot carry the
+                // hint on its own: a PPM that does not answer
+                // GET_CABLE_PROPERTY leaves `current_rating` permanently
+                // `None`, and the hint would fire on every big charger —
+                // including a port running a live 20V/5A contract that is
+                // itself only legal over a 5A e-marked cable. So we also
+                // require positive evidence: the RDO operating current
+                // sitting at the spec's 3A default. An unknown request
+                // (`0`) or a higher one is not evidence of a non-e-marked
+                // cable. The bounds are held byte-identical to
+                // `ChargingDiagnostic::evaluate` on purpose, so this
+                // property and the `CableNoEMarker` bottleneck verdict
+                // cannot disagree on the requested-current axis.
                 let max_advertised_ma = pd_port
                     .source_capabilities
                     .iter()
@@ -1163,6 +1177,7 @@ impl DeviceSummary {
                 if port.partner.is_some()
                     && max_advertised_ma > 3_000
                     && s.cable.as_ref().and_then(|c| c.current_rating).is_none()
+                    && (2_900..=3_100).contains(&requested_ma)
                 {
                     s.properties
                         .push(("cable.no_emarker".into(), "true".into()));
@@ -2302,13 +2317,22 @@ mod tests {
 
     #[test]
     fn cable_no_emarker_property_fires_for_big_charger_without_cable_node() {
-        // 65W charger (20V/3.25A top PDO) with no cable directory at all —
-        // the >3A advertisement is unreachable without an e-marked cable,
-        // so the soft hint must surface.
+        // 65W charger (20V/3.25A top PDO) with no cable directory at all,
+        // and a real contract whose RDO operating current is pinned at
+        // exactly 3.0A — the >3A advertisement is unreachable without an
+        // e-marked cable, and the 3A pin is the positive evidence the hint
+        // now keys on (a merely advertised >3A, or an unknown request, is
+        // not enough). So the soft hint must surface.
         use crate::power::{PdoType, PowerDataObject};
         let port = TypeCPort {
             port_number: 1,
             partner: Some(crate::typec::TypeCPartner::default()),
+            power_supply: Some(TypeCPowerSupply {
+                online: true,
+                voltage_now_uv: Some(20_000_000),
+                current_now_ua: Some(3_000_000),
+                ..Default::default()
+            }),
             ..Default::default()
         };
         let pd = PowerDeliveryPort {
@@ -2381,6 +2405,54 @@ mod tests {
         };
         let s = DeviceSummary::from_typec_port(&port, Some(pd), Some(cable), None);
         assert!(!s.properties.iter().any(|(k, _)| k == "cable.no_emarker"));
+    }
+
+    #[test]
+    fn cable_no_emarker_property_absent_when_5a_contract_negotiated() {
+        // Upstream false positive: a UCSI laptop running a live 20V/5A 100W
+        // contract, reported as `cable.no_emarker` anyway. The PPM never
+        // answers GET_CABLE_PROPERTY, so the kernel registers no
+        // `portN-cable` node at all and `current_rating` is permanently
+        // `None` — no cable, however good, could ever satisfy the old
+        // condition away. Meanwhile the 5A contract the port ships alongside
+        // is itself proof of a 5A e-marked cable: 5A is only legal over one.
+        // The hint must key on the negotiated request, not on the mere
+        // advertisement, so it stays absent here.
+        use crate::power::{PdoType, PowerDataObject};
+        let port = TypeCPort {
+            port_number: 1,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            power_supply: Some(TypeCPowerSupply {
+                online: true,
+                voltage_now_uv: Some(20_000_000),
+                current_now_ua: Some(5_000_000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![PowerDataObject {
+                r#type: PdoType::FixedSupply,
+                voltage_mv: 20_000,
+                current_ma: 5_000,
+                power_mw: 100_000,
+                is_active: true,
+                ..Default::default()
+            }],
+            max_source_power_mw: 100_000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
+        assert!(
+            !s.properties.iter().any(|(k, _)| k == "cable.no_emarker"),
+            "a negotiated 5A contract proves an e-marked cable — the hint must not fire"
+        );
+        // Pin the property and the bottleneck verdict to agree.
+        assert!(
+            s.charging_diag.as_ref().map(|d| &d.bottleneck)
+                != Some(&crate::diagnostic::Bottleneck::CableNoEMarker),
+            "the diagnostic must not blame a missing e-marker either"
+        );
     }
 
     #[test]
