@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`cable.no_emarker` no longer fires against a live 5A contract.** The
+  summary property checked only whether the charger advertised more than 3A
+  somewhere in its capabilities and whether a cable e-marker current rating
+  was visible — never the negotiated operating current.
+
+  On UCSI systems whose PPM does not answer GET_CABLE_PROPERTY the kernel
+  registers no `portN-cable` node at all, so the e-marker rating is
+  permanently absent and no cable, however good, could satisfy the condition
+  away. The hint therefore fired on every big charger, including ports
+  running a 20V/5A 100W contract that is itself only legal over a 5A
+  e-marked cable — the property contradicted the very payload it shipped
+  alongside.
+
+  The property now additionally requires the RDO operating current to sit at
+  the spec's 3A default, using the same bounds `ChargingDiagnostic` has
+  always applied, so the property and the `CableNoEMarker` bottleneck agree.
+  An unknown request (no power-supply node) is no longer treated as evidence
+  of a non-e-marked cable.
+
+  This narrows an existing key's firing condition; it is not an interface
+  change. The key name is unchanged and the D-Bus interface stays
+  `org.usbeehive.Devices5`.
+
 ## [0.12.0] - 2026-09-05
 
 ### Added
