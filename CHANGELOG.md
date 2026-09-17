@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-09-17
+
 ### Fixed
 
 - **`cable.no_emarker` no longer fires against a live 5A contract.** The
@@ -27,6 +29,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   always applied, so the property and the `CableNoEMarker` bottleneck agree.
   An unknown request (no power-supply node) is no longer treated as evidence
   of a non-e-marked cable.
+
+  This narrows an existing key's firing condition; it is not an interface
+  change. The key name is unchanged and the D-Bus interface stays
+  `org.usbeehive.Devices5`.
+
+- **`cable.no_emarker` now keys on the active PDO, not the charger's best
+  advertisement.** The property still measured the charger side by the
+  maximum current offered anywhere in the source capabilities, while
+  `ChargingDiagnostic` measured it by the current the *negotiated* PDO
+  offers.
+
+  A charger advertising 5V/3A, 9V/3A and 20V/5A, with the device holding the
+  9V/3A contract and drawing 3.0A, therefore still tripped the hint while the
+  diagnostic correctly stayed silent. The 20V/5A PDO was merely advertised,
+  never selected, and says nothing about the cable: the device was drawing
+  exactly what its own 3A contract offers, over a PDO a plain 3A cable
+  carries perfectly well. This is the PDO layout from the originating bug
+  report.
+
+  The property is now condition-identical to the `CableNoEMarker` diagnostic
+  on both axes — charger-side current and requested current. One user-visible
+  narrowing follows from that identity: a port where the kernel marks no PDO
+  active no longer raises the hint at all, matching the diagnostic's
+  long-standing behaviour.
 
   This narrows an existing key's firing condition; it is not an interface
   change. The key name is unchanged and the D-Bus interface stays
@@ -834,7 +860,8 @@ For library consumers:
 - Cast signal handler through `*const ()` for clippy fn-to-int lint.
 - Re-enable `watch` feature by default.
 
-[Unreleased]: https://github.com/abrauchli/usbeehive/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/abrauchli/usbeehive/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/abrauchli/usbeehive/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/abrauchli/usbeehive/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/abrauchli/usbeehive/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/abrauchli/usbeehive/compare/v0.9.0...v0.10.0
