@@ -1141,41 +1141,45 @@ impl DeviceSummary {
                 // Active PDO ⇒ what the contract allows. Fall back to the
                 // advertised max for the display figure only — contract_mw
                 // stays 0 unless a contract was actually inferred.
-                let active_pdo_mw = pd_port
-                    .source_capabilities
-                    .iter()
-                    .find(|p| p.is_active)
-                    .map(|p| p.power_mw);
+                let active_pdo = pd_port.source_capabilities.iter().find(|p| p.is_active);
+                let active_pdo_mw = active_pdo.map(|p| p.power_mw);
+                let active_ma = active_pdo.map(|p| p.current_ma).unwrap_or(0);
                 contract_mw = active_pdo_mw.unwrap_or(0);
                 sink_power_mw = active_pdo_mw.unwrap_or(pd_port.max_source_power_mw);
 
-                // No e-marker visible while the charger advertises more
-                // than 3A somewhere in its caps: the cable may silently
-                // pin the contract at the spec's 3A default. Soft hint —
-                // some UCSI firmwares never populate cable nodes at all,
-                // so this means "not visible", never "missing".
+                // No e-marker visible while the *selected* PDO offers more
+                // than 3A: the cable may silently pin the contract at the
+                // spec's 3A default. Soft hint — some UCSI firmwares never
+                // populate cable nodes at all, so this means "not visible",
+                // never "missing".
                 //
-                // Which is exactly why the absent rating cannot carry the
-                // hint on its own: a PPM that does not answer
-                // GET_CABLE_PROPERTY leaves `current_rating` permanently
-                // `None`, and the hint would fire on every big charger —
-                // including a port running a live 20V/5A contract that is
-                // itself only legal over a 5A e-marked cable. So we also
-                // require positive evidence: the RDO operating current
-                // sitting at the spec's 3A default. An unknown request
-                // (`0`) or a higher one is not evidence of a non-e-marked
-                // cable. The bounds are held byte-identical to
-                // `ChargingDiagnostic::evaluate` on purpose, so this
-                // property and the `CableNoEMarker` bottleneck verdict
-                // cannot disagree on the requested-current axis.
-                let max_advertised_ma = pd_port
-                    .source_capabilities
-                    .iter()
-                    .map(|p| p.current_ma)
-                    .max()
-                    .unwrap_or(0);
+                // The charger-side basis is the ACTIVE PDO's current, not
+                // the largest figure anywhere in the caps. A 5A PDO that is
+                // merely advertised and never negotiated says nothing about
+                // the cable: a device on a 9V/3A contract is drawing exactly
+                // what it asked for, from a PDO a plain 3A cable carries
+                // perfectly well.
+                //
+                // The absent rating likewise cannot carry the hint on its
+                // own: a PPM that does not answer GET_CABLE_PROPERTY leaves
+                // `current_rating` permanently `None`, and the hint would
+                // fire on every big charger — including a port running a
+                // live 20V/5A contract that is itself only legal over a 5A
+                // e-marked cable. So we also require positive evidence: the
+                // RDO operating current sitting at the spec's 3A default. An
+                // unknown request (`0`) or a higher one is not evidence of a
+                // non-e-marked cable.
+                //
+                // Both the charger-side threshold and the requested-current
+                // bounds are held byte-identical to
+                // `ChargingDiagnostic::evaluate` on purpose, so this property
+                // and the `CableNoEMarker` bottleneck verdict cannot disagree
+                // on either axis. Accepted consequence of that identity: a
+                // port where the kernel marks no PDO active yields 0 here and
+                // therefore never raises the hint. `evaluate` has always
+                // behaved exactly that way; aligning with it is the point.
                 if port.partner.is_some()
-                    && max_advertised_ma > 3_000
+                    && active_ma > 3_100
                     && s.cable.as_ref().and_then(|c| c.current_rating).is_none()
                     && (2_900..=3_100).contains(&requested_ma)
                 {
@@ -2319,10 +2323,14 @@ mod tests {
     fn cable_no_emarker_property_fires_for_big_charger_without_cable_node() {
         // 65W charger (20V/3.25A top PDO) with no cable directory at all,
         // and a real contract whose RDO operating current is pinned at
-        // exactly 3.0A — the >3A advertisement is unreachable without an
-        // e-marked cable, and the 3A pin is the positive evidence the hint
-        // now keys on (a merely advertised >3A, or an unknown request, is
-        // not enough). So the soft hint must surface.
+        // exactly 3.0A — the >3A offer is unreachable without an e-marked
+        // cable, and the 3A pin is the positive evidence the hint keys on
+        // (an unknown request, or a higher one, is not enough). So the soft
+        // hint must surface.
+        //
+        // The charger-side basis is the ACTIVE PDO's current: this 20V PDO
+        // is the contracted one (3250mA > 3100), marked explicitly here and
+        // independently inferred from the 20V `voltage_now_uv` below.
         use crate::power::{PdoType, PowerDataObject};
         let port = TypeCPort {
             port_number: 1,
@@ -2341,6 +2349,7 @@ mod tests {
                 voltage_mv: 20_000,
                 current_ma: 3_250,
                 power_mw: 65_000,
+                is_active: true,
                 ..Default::default()
             }],
             max_source_power_mw: 65_000,
@@ -2355,8 +2364,11 @@ mod tests {
 
     #[test]
     fn cable_no_emarker_property_silent_for_3a_only_charger() {
-        // A 15W charger never advertises beyond 3A — a non-e-marked cable
-        // costs nothing here, so the hint must stay quiet.
+        // A 15W charger never offers beyond 3A — a non-e-marked cable costs
+        // nothing here, so the hint must stay quiet. The 5V/3A PDO is marked
+        // active so that the reason in this test's name is what keeps it
+        // silent (3000 is not greater than 3100), rather than the vacuous
+        // absence of any active PDO.
         use crate::power::{PdoType, PowerDataObject};
         let port = TypeCPort {
             port_number: 1,
@@ -2369,6 +2381,7 @@ mod tests {
                 voltage_mv: 5_000,
                 current_ma: 3_000,
                 power_mw: 15_000,
+                is_active: true,
                 ..Default::default()
             }],
             max_source_power_mw: 15_000,
@@ -2446,6 +2459,61 @@ mod tests {
         assert!(
             !s.properties.iter().any(|(k, _)| k == "cable.no_emarker"),
             "a negotiated 5A contract proves an e-marked cable — the hint must not fire"
+        );
+        // Pin the property and the bottleneck verdict to agree.
+        assert!(
+            s.charging_diag.as_ref().map(|d| &d.bottleneck)
+                != Some(&crate::diagnostic::Bottleneck::CableNoEMarker),
+            "the diagnostic must not blame a missing e-marker either"
+        );
+    }
+
+    #[test]
+    fn cable_no_emarker_property_absent_when_active_pdo_is_3a() {
+        // The originating bug report's PDO layout: a 100W charger that also
+        // advertises 20V/5A, but the device negotiated the 9V/3A PDO and is
+        // drawing exactly the 3.0A that contract offers. The 5A PDO is merely
+        // advertised — never selected — so it says nothing about the cable.
+        // The hint must key on the current the ACTIVE PDO offers, exactly as
+        // `ChargingDiagnostic::evaluate` does, and therefore stay absent.
+        use crate::power::{PdoType, PowerDataObject};
+        let port = TypeCPort {
+            port_number: 1,
+            partner: Some(crate::typec::TypeCPartner::default()),
+            power_supply: Some(TypeCPowerSupply {
+                online: true,
+                voltage_now_uv: Some(9_000_000),
+                current_now_ua: Some(3_000_000),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let pd = PowerDeliveryPort {
+            source_capabilities: vec![
+                PowerDataObject {
+                    r#type: PdoType::FixedSupply,
+                    voltage_mv: 9_000,
+                    current_ma: 3_000,
+                    power_mw: 27_000,
+                    is_active: true,
+                    ..Default::default()
+                },
+                PowerDataObject {
+                    r#type: PdoType::FixedSupply,
+                    voltage_mv: 20_000,
+                    current_ma: 5_000,
+                    power_mw: 100_000,
+                    ..Default::default()
+                },
+            ],
+            max_source_power_mw: 100_000,
+            ..Default::default()
+        };
+        let s = DeviceSummary::from_typec_port(&port, Some(pd), None, None);
+        assert!(
+            !s.properties.iter().any(|(k, _)| k == "cable.no_emarker"),
+            "the device is drawing what its own active 3A PDO offers — that is \
+             not evidence of a 3A cable pin, so the hint must not fire"
         );
         // Pin the property and the bottleneck verdict to agree.
         assert!(
