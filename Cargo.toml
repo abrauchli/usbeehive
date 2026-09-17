@@ -11,6 +11,11 @@ readme = "README.md"
 rust-version = "1.85"
 keywords = ["usb", "usb-c", "power-delivery", "sysfs", "cli"]
 categories = ["command-line-utilities", "hardware-support", "os::linux-apis"]
+exclude = [
+  ".gsd/",
+  ".planning/quick/",
+  ".planning/config.json",
+]
 
 [lib]
 name = "usbeehive"
